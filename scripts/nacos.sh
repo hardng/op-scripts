@@ -36,7 +36,7 @@ download_if_not_exists() {
 # Main function
 main() {
     # Parse command line arguments
-    NACOS_VERSION=""
+    NACOS_VERSION="2.5.1"
     ENABLE_PROMETHEUS=true
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -66,8 +66,8 @@ main() {
     TEMP_DIR="/tmp/nacos-install"
 
     # Generate random passwords
-    MYSQL_ROOT_PASSWORD=$(openssl rand -base64 16)
-    NACOS_MYSQL_PASSWORD=$(openssl rand -base64 16)
+    MYSQL_ROOT_PASSWORD=$(openssl rand -base64 16 | tr -dc 'A-Za-z0-9')
+    NACOS_MYSQL_PASSWORD=$(openssl rand -base64 16 | tr -dc 'A-Za-z0-9')
 
     # Fetch latest Nacos version if not specified
     if [ -z "$NACOS_VERSION" ]; then
@@ -166,7 +166,7 @@ main() {
 
     # Copy Nacos config to host
     echo -e "\033[32m#################### Copying Nacos config to host... ####################\033[0m"
-    docker run --rm -d --name temp-nacos nacos/nacos-server:v$NACOS_VERSION
+    docker run --rm -d --name temp-nacos nacos/nacos-server:v${NACOS_VERSION}
     sleep 5
     docker cp temp-nacos:/home/nacos/conf/. $NACOS_CONF_DIR
     docker stop temp-nacos
@@ -178,7 +178,7 @@ main() {
     else
         echo -e "\033[32mNacos volume mounts already configured in standalone-mysql.yaml. Skipping modification.\033[0m"
     fi
-    sed -i "s/\${NACOS_VERSION}/$NACOS_VERSION/g" $NACOS_DIR/example/standalone-mysql.yaml
+    sed -i "s/\${NACOS_VERSION}/v${NACOS_VERSION}/g" $NACOS_DIR/example/standalone-mysql.yaml
     sed -i "s/root/$MYSQL_ROOT_PASSWORD/g" $NACOS_DIR/env/mysql.env
     sed -i "s/MYSQL_SERVICE_PASSWORD=nacos/MYSQL_SERVICE_PASSWORD=$NACOS_MYSQL_PASSWORD/g" $NACOS_DIR/env/nacos-standalone-mysql.env
     echo -e "\033[32m#################### Nacos configurations modified ####################\033[0m"
@@ -205,10 +205,10 @@ main() {
 
     docker cp mysql-schema.sql mysql:/mysql-schema.sql
     echo -e "\033[32m#################### mysql-schema.sql copied to MySQL container ####################\033[0m"
-
+    sleep 3
     # Drop old DB, create new, and import schema
     docker exec -i mysql bash -c "
-MYSQL_PWD='$MYSQL_ROOT_PASSWORD' mysql -uroot -e \"
+MYSQL_PWD='$MYSQL_ROOT_PASSWORD' mysql -uroot -S/run/mysqld/mysqld.sock -e \"
     DROP DATABASE IF EXISTS nacos_devtest;
     CREATE DATABASE nacos_devtest DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
     USE nacos_devtest;
@@ -219,7 +219,7 @@ MYSQL_PWD='$MYSQL_ROOT_PASSWORD' mysql -uroot -e \"
     # Modify Nacos MySQL user password
     echo -e "\033[32m#################### Modifying Nacos MySQL user password... ####################\033[0m"
     docker exec -i mysql bash -c "
-  MYSQL_PWD='$MYSQL_ROOT_PASSWORD' mysql -uroot -e \"
+MYSQL_PWD='$MYSQL_ROOT_PASSWORD' mysql -uroot -S /run/mysqld/mysqld.sock -e \"
     ALTER USER 'nacos'@'%' IDENTIFIED BY '$NACOS_MYSQL_PASSWORD';
     FLUSH PRIVILEGES;
   \"
@@ -227,7 +227,7 @@ MYSQL_PWD='$MYSQL_ROOT_PASSWORD' mysql -uroot -e \"
     echo -e "\033[32m#################### Nacos MySQL user password modified successfully ####################\033[0m"
 
     # Configure Nacos authentication
-    docker exec -it nacos-standalone-mysql bash -c 'echo "
+    docker exec -i nacos-standalone-mysql bash -c 'echo "
 nacos.core.auth.enabled=true
 nacos.core.auth.enable.userAgentAuthWhite=false
 springdoc.api-docs.enabled=false
@@ -237,7 +237,7 @@ springdoc.swagger-ui.enabled=false" >> /home/nacos/conf/application.properties'
     # Enable Prometheus metrics if specified
     if [ "$ENABLE_PROMETHEUS" = true ]; then
         echo -e "\033[32m#################### Enabling Prometheus metrics... ####################\033[0m"
-        docker exec -it nacos-standalone-mysql bash -c '
+        docker exec -i nacos-standalone-mysql bash -c '
         if ! grep -q "management.endpoints.web.exposure.include=" /home/nacos/conf/application.properties; then
             echo "management.endpoints.web.exposure.include=*" >> /home/nacos/conf/application.properties
         fi'
