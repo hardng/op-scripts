@@ -87,9 +87,10 @@ main() {
     fi
 
     # Check if version supports Prometheus (0.8.0+)
-    if [[ "$NACOS_VERSION" < "0.8.0" && "$ENABLE_PROMETHEUS" = true ]]; then
+    if [[ "$(printf '%s\n' "$NACOS_VERSION" "0.8.0" | sort -V | head -n1)" = "$NACOS_VERSION" ]] && [[ "$ENABLE_PROMETHEUS" = true ]]; then
         echo -e "\033[33mWarning: Nacos version $NACOS_VERSION may not support Prometheus metrics. Proceeding anyway.\033[0m"
     fi
+
 
     # Detect OS type
     if [ -f /etc/redhat-release ]; then
@@ -165,7 +166,7 @@ main() {
 
     # Copy Nacos config to host
     echo -e "\033[32m#################### Copying Nacos config to host... ####################\033[0m"
-    docker run --rm -d --name temp-nacos nacos/nacos-server:$NACOS_VERSION
+    docker run --rm -d --name temp-nacos nacos/nacos-server:v$NACOS_VERSION
     sleep 5
     docker cp temp-nacos:/home/nacos/conf/. $NACOS_CONF_DIR
     docker stop temp-nacos
