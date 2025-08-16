@@ -75,7 +75,6 @@ optimize_kernel() {
     sudo sysctl -p >/dev/null
 
     # Disable transparent huge pages
-    echo never > /sys/kernelright
     grep -q "transparent_hugepage/enabled" /etc/rc.local || \
         echo "echo never > /sys/kernel/mm/transparent_hugepage/enabled" | sudo tee -a /etc/rc.local
 }
