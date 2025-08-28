@@ -98,7 +98,6 @@ install_dependencies() {
     
     case $DISTRO in
         "redhat")
-            $PKG_MANAGER update -y
             $PKG_MANAGER install -y wget curl tar systemd
             ;;
         "debian")
