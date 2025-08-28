@@ -127,7 +127,7 @@ download_and_install() {
     ARCH=$(uname -m)
     case $ARCH in
         x86_64)
-            ARCH="amd64"
+            ARCH="x86_64"
             ;;
         aarch64|arm64)
             ARCH="arm64"
@@ -141,7 +141,7 @@ download_and_install() {
             ;;
     esac
     
-    DOWNLOAD_URL="https://github.com/syepes/network_exporter/releases/download/v${NETWORK_EXPORTER_VERSION}/network_exporter-${NETWORK_EXPORTER_VERSION}.linux-${ARCH}.tar.gz"
+    DOWNLOAD_URL="https://github.com/syepes/network_exporter/releases/download/${NETWORK_EXPORTER_VERSION}/network_exporter_${NETWORK_EXPORTER_VERSION}.Linux_${ARCH}.tar.gz"
     TEMP_DIR=$(mktemp -d)
     
     if [[ "$DRY_RUN" == "false" ]]; then
@@ -154,7 +154,7 @@ download_and_install() {
         mkdir -p "$(dirname $CONFIG_FILE)"
         
         # Copy binary
-        cp network_exporter-${NETWORK_EXPORTER_VERSION}.linux-${ARCH}/network_exporter "$INSTALL_DIR/"
+        cp network_exporter_${NETWORK_EXPORTER_VERSION}.Linux_${ARCH}/network_exporter "$INSTALL_DIR/"
         chmod +x "$INSTALL_DIR/network_exporter"
         chown -R $NETWORK_EXPORTER_USER:$NETWORK_EXPORTER_USER "$INSTALL_DIR"
         
