@@ -14,6 +14,7 @@ NETWORK_EXPORTER_PORT="9427"
 INSTALL_DIR="/opt/network_exporter"
 SERVICE_FILE="/etc/systemd/system/network_exporter.service"
 CONFIG_FILE="/etc/network_exporter/config.yml"
+CONFIG_SOURCE="network_exporter.yml"
 
 # Colors for output
 RED='\033[0;31m'
@@ -154,7 +155,7 @@ download_and_install() {
         mkdir -p "$(dirname $CONFIG_FILE)"
         
         # Copy binary
-        cp network_exporter_${NETWORK_EXPORTER_VERSION}.Linux_${ARCH}/network_exporter "$INSTALL_DIR/"
+        cp network_exporter "$INSTALL_DIR/"
         chmod +x "$INSTALL_DIR/network_exporter"
         chown -R $NETWORK_EXPORTER_USER:$NETWORK_EXPORTER_USER "$INSTALL_DIR"
         
@@ -169,9 +170,12 @@ download_and_install() {
 # Create configuration file
 create_config() {
     print_info "Creating configuration file: $CONFIG_FILE"
-    
-    if [[ "$DRY_RUN" == "false" ]]; then
-        cat > "$CONFIG_FILE" << EOF
+    if [[ -f "$CONFIG_SOURCE" ]]; then
+        print_info "Found existing network_exporter.yml in release, copying it..."
+        cp "$CONFIG_SOURCE" "$CONFIG_FILE"
+    else
+        if [[ "$DRY_RUN" == "false" ]]; then
+            cat > "$CONFIG_FILE" << EOF
 # Network Exporter Configuration
 # Listen address and port
 listen_address: "0.0.0.0:${NETWORK_EXPORTER_PORT}"
@@ -193,9 +197,10 @@ targets:
     port: 53
     protocol: "udp"
 EOF
-        chown $NETWORK_EXPORTER_USER:$NETWORK_EXPORTER_USER "$CONFIG_FILE"
-    else
-        print_info "Would create config file: $CONFIG_FILE"
+            chown $NETWORK_EXPORTER_USER:$NETWORK_EXPORTER_USER "$CONFIG_FILE"
+        else
+            print_info "Would create config file: $CONFIG_FILE"
+        fi
     fi
 }
 
