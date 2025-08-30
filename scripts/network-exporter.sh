@@ -226,6 +226,9 @@ StandardError=journal
 SyslogIdentifier=network_exporter
 KillMode=mixed
 KillSignal=SIGTERM
+AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_RAW CAP_NET_ADMIN
+NoNewPrivileges=false
 
 # Security settings
 NoNewPrivileges=true
