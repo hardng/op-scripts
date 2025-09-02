@@ -20,6 +20,7 @@ Initialize and configure Linux systems (supports CentOS7+/Rocky/Alma and Debian/
 
 Available commands:
   all       Perform all configurations (install packages, security, timezone, SSH, optimization, expand, clean)
+  init      Perform configurations (install packages, security, timezone, SSH, optimization, clean)
   update    Install or update base packages
   security  Disable firewall and SELinux (RHEL) or ufw (Debian)
   time      Set timezone to Asia/Shanghai and enable NTP
@@ -601,7 +602,15 @@ main() {
       configure_ssh || true
       apply_sysctl_limits || true
       disable_thp_numa || true
-      expand_root_lvm || true
+      clean_cache || true
+      ;;
+    init)
+      install_pkgs || true
+      disable_security || true
+      set_timezone_ntp || true
+      configure_ssh || true
+      apply_sysctl_limits || true
+      disable_thp_numa || true
       clean_cache || true
       ;;
     update)
