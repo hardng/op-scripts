@@ -196,11 +196,9 @@ install_dependencies() {
             apt install -y curl wget unzip systemd
             ;;
         yum)
-            yum update -y
             yum install -y curl wget unzip systemd
             ;;
         dnf)
-            dnf update -y
             dnf install -y curl wget unzip systemd
             ;;
     esac
