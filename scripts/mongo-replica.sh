@@ -2,12 +2,12 @@
 
 # MongoDB Replica Set Installation Script with Prometheus Exporter and Authentication
 # Supports Debian and CentOS-based systems, Prometheus exporter, systemd management
-# Modified to support three instances on a single host or single instance per host
+# Modified to support three instances on a single host or single instance per host or standalone mode
 
 set -e
 
 # Default values
-MONGODB_VERSION="5.0"
+MONGODB_VERSION="7.0"
 DATA_DIR=""
 ROLE=""
 REPLICA_SET_NAME="rs0"
@@ -25,10 +25,12 @@ MONGO_MON_PASS="m7pX3ucRmVUJnpFL7N44"
 PRIMARY_IP="127.0.0.1"  # Default to localhost for single host
 SECONDARY_IP="127.0.0.1"
 ARBITER_IP="127.0.0.1"
-PID_DIR="/var/run/mongodb"
+PID_DIR="/data/mongodb"
 PID_FILE="$PID_DIR/mongod.pid"
 MULTI_INSTANCE=false  # New flag to enable multi-instance on single host
 INSTANCE_NAME=""      # Instance-specific name for multi-instance mode
+STANDALONE=false      # New flag for standalone mode (no replica set)
+STANDALONE_PORT=27017 # Default port for standalone mode
 
 usage() {
     echo "使用方法: $0 <子命令> [选项]"
@@ -43,13 +45,22 @@ usage() {
     echo "  --data-dir <路径>                   数据目录路径"
     echo "  --mongodb-version <版本>            MongoDB 版本 (默认: $MONGODB_VERSION)"
     echo "  --multi-instance                    启用单主机多实例模式"
+    echo "  --standalone                        部署单节点模式 (无副本集)"
+    echo "  --port <端口>                       单节点模式的端口 (默认: $STANDALONE_PORT)"
     echo ""
     echo "init-replica、config-auth 和 install 的选项:"
-    echo "  --role <primary|secondary|arbiter>  指定节点角色"
+    echo "  --role <primary|secondary|arbiter>  指定节点角色 (单节点模式不需要)"
     echo "  --data-dir <路径>                   数据目录路径"
     echo "  --primary-ip <IP>                   主节点 IP (默认: $PRIMARY_IP)"
     echo "  --secondary-ip <IP>                 从节点 IP (默认: $SECONDARY_IP)"
     echo "  --arbiter-ip <IP>                   仲裁节点 IP (默认: $ARBITER_IP)"
+    echo ""
+    echo "示例:"
+    echo "  # 部署单节点 MongoDB"
+    echo "  $0 install --standalone --data-dir /data/mongodb"
+    echo ""
+    echo "  # 部署副本集主节点"
+    echo "  $0 install --role primary --data-dir /data/mongodb --primary-ip 192.168.1.10 --secondary-ip 192.168.1.11 --arbiter-ip 192.168.1.12"
     exit 1
 }
 
@@ -94,14 +105,44 @@ gpgcheck=1
 enabled=1
 gpgkey=https://www.mongodb.org/static/pgp/server-${MONGODB_VERSION}.asc
 EOF
-        LATEST_MONGO_VERSION=$(yum --showduplicates list mongodb-org | grep "${MONGODB_VERSION}" | tail -n 1 | awk '{print $2}' | cut -d'-' -f1)
-        PACKAGELIST=(mongodb-org-${LATEST_MONGO_VERSION} mongodb-org-database-${LATEST_MONGO_VERSION} mongodb-org-server-${LATEST_MONGO_VERSION} mongodb-org-mongos-${LATEST_MONGO_VERSION} mongodb-org-tools-${LATEST_MONGO_VERSION})
-        for n in ${PACKAGELIST[@]}
-        do
-          rpm -q ${n} | grep -q "${n}" && yum install -y ${n}
-        done
-        LATEST_MONGOSHELL_VERSION=$(yum --showduplicates list mongodb-mongosh | grep "${MONGODB_VERSION}" | tail -n 1 | awk '{print $2}' | cut -d'-' -f1)
-        rpm -q mongodb-mongosh-${LATEST_MONGOSHELL_VERSION} | grep -q "mongodb-mongosh" && yum install -y mongodb-mongosh-${LATEST_MONGOSHELL_VERSION}
+        yum clean all
+        yum makecache
+        
+        # 检查MongoDB包是否可用
+        if ! yum list available mongodb-org-${MONGODB_VERSION} 2>/dev/null | grep -q mongodb-org; then
+            echo "错误: 无法从仓库获取MongoDB包，请检查:"
+            echo "1. 网络连接是否正常"
+            echo "2. MongoDB版本 ${MONGODB_VERSION} 是否支持当前系统版本"
+            echo "3. 仓库URL是否正确"
+            exit 1
+        fi
+        
+        # 获取最新版本号
+        LATEST_MONGO_VERSION=$(yum --showduplicates list mongodb-org 2>/dev/null | grep "${MONGODB_VERSION}" | tail -n 1 | awk '{print $2}' | cut -d'-' -f1)
+        
+        if [[ -z "$LATEST_MONGO_VERSION" ]]; then
+            echo "警告: 无法获取精确版本号，尝试安装mongodb-org..."
+            yum install -y mongodb-org
+        else
+            echo "找到 MongoDB 版本: $LATEST_MONGO_VERSION"
+            PACKAGELIST=(mongodb-org-${LATEST_MONGO_VERSION} mongodb-org-database-${LATEST_MONGO_VERSION} mongodb-org-server-${LATEST_MONGO_VERSION} mongodb-org-mongos-${LATEST_MONGO_VERSION} mongodb-org-tools-${LATEST_MONGO_VERSION})
+            for n in ${PACKAGELIST[@]}
+            do
+              if ! rpm -q ${n} >/dev/null 2>&1; then
+                  yum install -y ${n}
+              fi
+            done
+        fi
+        
+        # 安装mongosh
+        if yum list available mongodb-mongosh >/dev/null 2>&1; then
+            LATEST_MONGOSHELL_VERSION=$(yum --showduplicates list mongodb-mongosh 2>/dev/null | tail -n 1 | awk '{print $2}' | cut -d'-' -f1)
+            if [[ -n "$LATEST_MONGOSHELL_VERSION" ]] && ! rpm -q mongodb-mongosh-${LATEST_MONGOSHELL_VERSION} >/dev/null 2>&1; then
+                yum install -y mongodb-mongosh-${LATEST_MONGOSHELL_VERSION} || yum install -y mongodb-mongosh
+            fi
+        else
+            echo "注意: mongodb-mongosh 不可用，将使用旧版mongo shell"
+        fi
     fi
 }
 
@@ -144,7 +185,26 @@ configure_mongodb() {
     fi
     mkdir -p "$log_dir"
     mkdir -p "$PID_DIR"
-    cat > "$config_file" <<EOF
+    
+    # Different configuration for standalone vs replica set
+    if [[ "$STANDALONE" == "true" ]]; then
+        cat > "$config_file" <<EOF
+storage:
+  dbPath: $DATA_DIR
+systemLog:
+  destination: file
+  logAppend: true
+  path: $log_dir/mongod.log
+net:
+  port: $PORT
+  bindIp: 0.0.0.0
+security:
+  authorization: enabled
+processManagement:
+  pidFilePath: $pid_file
+EOF
+    else
+        cat > "$config_file" <<EOF
 storage:
   dbPath: $DATA_DIR
 systemLog:
@@ -162,6 +222,8 @@ security:
 processManagement:
   pidFilePath: $pid_file
 EOF
+    fi
+    
     chown -R $MONGODB_USER:$MONGODB_USER "$log_dir"
     chown -R $MONGODB_USER:$MONGODB_USER "$PID_DIR"
     chown -R $MONGODB_USER:$MONGODB_USER "$DATA_DIR"
@@ -171,18 +233,31 @@ EOF
 configure_systemd() {
     echo "为 MongoDB 设置 systemd..."
     local service_file=$SERVICE_FILE
+    local config_file=$CONFIG_FILE
+    local pid_file=$PID_FILE
+    
     if [[ "$MULTI_INSTANCE" == "true" ]]; then
         service_file="/etc/systemd/system/mongod-${INSTANCE_NAME}.service"
+        config_file="/etc/mongod-${INSTANCE_NAME}.conf"
+        pid_file="$PID_DIR/mongod-${INSTANCE_NAME}.pid"
     fi
+    
+    local description="MongoDB Database Server"
+    if [[ "$STANDALONE" == "true" ]]; then
+        description="MongoDB Database Server (Standalone)"
+    elif [[ -n "$ROLE" ]]; then
+        description="MongoDB Database Server ($ROLE)"
+    fi
+    
     cat > "$service_file" <<EOF
 [Unit]
-Description=MongoDB Database Server ($ROLE)
+Description=$description
 After=network.target
 [Service]
 User=$MONGODB_USER
 Group=$MONGODB_USER
-ExecStart=/usr/bin/mongod --config ${CONFIG_FILE}
-PIDFile=${PID_FILE}
+ExecStart=/usr/bin/mongod --config ${config_file}
+PIDFile=${pid_file}
 LimitNOFILE=64000
 Restart=always
 [Install]
@@ -194,6 +269,12 @@ EOF
 }
 
 setup_keyfile() {
+    # Keyfile is only needed for replica sets
+    if [[ "$STANDALONE" == "true" ]]; then
+        echo "单节点模式，跳过 keyFile 创建..."
+        return
+    fi
+    
     if [[ ! -f /etc/mongod.key ]]; then
         echo "创建 MongoDB keyFile..."
         openssl rand -base64 756 > /etc/mongod.key
@@ -220,7 +301,50 @@ EOF
     fi
 }
 
+enable_auth_standalone() {
+    echo "配置单节点认证..."
+    CMD=$(command -v mongosh || command -v mongo)
+    
+    # Wait for MongoDB to start
+    sleep 3
+    
+    # Create users in standalone mode
+    $CMD --port $PORT <<EOF
+use admin
+db.createUser({
+  user: "${MONGO_ADMIN_USER}",
+  pwd: "${MONGO_ADMIN_PASS}",
+  roles: [ { role: "root", db: "admin" } ]
+})
+db.createUser({
+  user: "${MONGO_MON_USER}",
+  pwd: "${MONGO_MON_PASS}",
+  roles: [
+    { role: "clusterMonitor", db: "admin" },
+    { role: "readAnyDatabase", db: "admin" }
+  ]
+})
+exit
+EOF
+
+    # Restart service after enabling auth
+    local service_name="mongod"
+    if [[ "$MULTI_INSTANCE" == "true" ]]; then
+        service_name="mongod-${INSTANCE_NAME}"
+    fi
+    
+    echo "重启 MongoDB 服务以启用认证..."
+    systemctl restart "$service_name"
+    echo "单节点认证配置完成。"
+}
+
 enable_auth() {
+    # For standalone mode, use simpler auth setup
+    if [[ "$STANDALONE" == "true" ]]; then
+        enable_auth_standalone
+        return
+    fi
+    
     CMD=$(command -v mongosh || command -v mongo)
 
     echo "等待副本集选举主节点..."
@@ -280,19 +404,29 @@ configure_exporter_systemd() {
     echo "配置导出器服务..."
     local exporter_port=$PROMETHEUS_EXPORTER_PORT
     local service_name="mongodb-exporter"
+    local mongodb_uri=""
+    
     if [[ "$MULTI_INSTANCE" == "true" ]]; then
         exporter_port=$((PROMETHEUS_EXPORTER_PORT + $(echo "$INSTANCE_NAME" | grep -o '[0-9]*') ))
         service_name="mongodb-exporter-${INSTANCE_NAME}"
     fi
+    
+    # Different URI for standalone vs replica set
+    if [[ "$STANDALONE" == "true" ]]; then
+        mongodb_uri="mongodb://${MONGO_MON_USER}:${MONGO_MON_PASS}@127.0.0.1:${PORT}/admin"
+    else
+        mongodb_uri="mongodb://${MONGO_MON_USER}:${MONGO_MON_PASS}@${PRIMARY_IP}:${PRIMARY_PORT},${SECONDARY_IP}:${SECONDARY_PORT}/admin?replicaSet=${REPLICA_SET_NAME}"
+    fi
+    
     cat > /etc/systemd/system/${service_name}.service <<EOF
 [Unit]
-Description=MongoDB Exporter ($ROLE)
+Description=MongoDB Exporter
 After=network.target
 [Service]
 User=${MONGODB_USER}
 Group=${MONGODB_USER}
 ExecStart=/usr/share/mongodb_exporter/mongodb_exporter \\
-  --mongodb.uri="mongodb://${MONGO_MON_USER}:${MONGO_MON_PASS}@${PRIMARY_IP}:${PRIMARY_PORT},${SECONDARY_IP}:${SECONDARY_PORT}/admin?replicaSet=${REPLICA_SET_NAME}" \\
+  --mongodb.uri="${mongodb_uri}" \\
   --web.listen-address=":${exporter_port}" \\
   --no-mongodb.direct-connect \\
   --collector.replicasetstatus=true \\
@@ -322,38 +456,71 @@ install() {
             --arbiter-ip) ARBITER_IP="$2"; shift ;;
             --mongodb-version) MONGODB_VERSION="$2"; shift ;;
             --multi-instance) MULTI_INSTANCE=true ;;
+            --standalone) STANDALONE=true ;;
+            --port) STANDALONE_PORT="$2"; shift ;;
             *) echo "未知选项: $1"; usage ;;
         esac
         shift
     done
-    if [[ -z "$ROLE" || -z "$DATA_DIR" ]]; then
-        echo "错误: install 需要 --role 和 --data-dir"
+    
+    # Validate parameters
+    if [[ -z "$DATA_DIR" ]]; then
+        echo "错误: install 需要 --data-dir"
         usage
     fi
-    if [[ "$ROLE" != "primary" && "$ROLE" != "secondary" && "$ROLE" != "arbiter" ]]; then
-        echo "错误: 角色必须是 'primary'、'secondary' 或 'arbiter'"
-        exit 1
+    
+    # Standalone and replica set are mutually exclusive
+    if [[ "$STANDALONE" == "true" ]]; then
+        if [[ -n "$ROLE" ]]; then
+            echo "警告: 单节点模式不需要 --role 参数，忽略..."
+        fi
+        PORT=$STANDALONE_PORT
+        ROLE="standalone"
+        echo "部署单节点 MongoDB，端口: $PORT"
+    else
+        if [[ -z "$ROLE" ]]; then
+            echo "错误: 副本集模式需要 --role 参数"
+            usage
+        fi
+        if [[ "$ROLE" != "primary" && "$ROLE" != "secondary" && "$ROLE" != "arbiter" ]]; then
+            echo "错误: 角色必须是 'primary'、'secondary' 或 'arbiter'"
+            exit 1
+        fi
+        case $ROLE in
+            primary) PORT=$PRIMARY_PORT; INSTANCE_NAME="primary" ;;
+            secondary) PORT=$SECONDARY_PORT; INSTANCE_NAME="secondary" ;;
+            arbiter) PORT=$ARBITER_PORT; INSTANCE_NAME="arbiter" ;;
+        esac
     fi
+    
     if [[ ! -d "$DATA_DIR" ]]; then
         mkdir -p "$DATA_DIR"
     fi
-    case $ROLE in
-        primary) PORT=$PRIMARY_PORT; INSTANCE_NAME="primary" ;;
-        secondary) PORT=$SECONDARY_PORT; INSTANCE_NAME="secondary" ;;
-        arbiter) PORT=$ARBITER_PORT; INSTANCE_NAME="arbiter" ;;
-    esac
+    
     # Adjust config and PID file paths for multi-instance
     if [[ "$MULTI_INSTANCE" == "true" ]]; then
         CONFIG_FILE="/etc/mongod-${INSTANCE_NAME}.conf"
         PID_FILE="$PID_DIR/mongod-${INSTANCE_NAME}.pid"
     fi
+    
     check_os
     create_mongodb_user
     install_mongodb
     setup_keyfile
     configure_mongodb
     configure_systemd
-    echo "MongoDB 安装完成，节点角色: $ROLE。"
+    
+    # For standalone, enable auth immediately after installation
+    if [[ "$STANDALONE" == "true" ]]; then
+        enable_auth
+        configure_exporter_systemd
+        echo "单节点 MongoDB 安装完成，端口: $PORT"
+        echo "管理员用户: ${MONGO_ADMIN_USER}"
+        echo "管理员密码: ${MONGO_ADMIN_PASS}"
+        echo "Prometheus 导出器端口: $PROMETHEUS_EXPORTER_PORT"
+    else
+        echo "MongoDB 安装完成，节点角色: $ROLE。"
+    fi
 }
 
 init_replica() {
