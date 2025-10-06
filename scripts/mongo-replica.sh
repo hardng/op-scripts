@@ -98,7 +98,7 @@ install_mongodb() {
         apt-get install -y mongodb-org=${MONGODB_VERSION}*
     else
         cat > /etc/yum.repos.d/mongodb-org.repo <<EOF
-[mongodb-org-${MONGODB_VERSION}]
+[mongodb-org]
 name=MongoDB Repository
 baseurl=https://repo.mongodb.org/yum/redhat/\$releasever/mongodb-org/${MONGODB_VERSION}/x86_64/
 gpgcheck=1
@@ -109,7 +109,7 @@ EOF
         yum makecache
         
         # 检查MongoDB包是否可用
-        if ! yum list available mongodb-org-${MONGODB_VERSION} 2>/dev/null | grep -q mongodb-org; then
+        if ! yum list available --repo mongodb-org 2>/dev/null | grep -q mongodb-org; then
             echo "错误: 无法从仓库获取MongoDB包，请检查:"
             echo "1. 网络连接是否正常"
             echo "2. MongoDB版本 ${MONGODB_VERSION} 是否支持当前系统版本"
