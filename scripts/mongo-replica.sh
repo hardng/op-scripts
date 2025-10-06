@@ -98,51 +98,21 @@ install_mongodb() {
         apt-get install -y mongodb-org=${MONGODB_VERSION}*
     else
         cat > /etc/yum.repos.d/mongodb-org.repo <<EOF
-[mongodb-org]
+[mongodb-org-${MONGODB_VERSION}]
 name=MongoDB Repository
 baseurl=https://repo.mongodb.org/yum/redhat/\$releasever/mongodb-org/${MONGODB_VERSION}/x86_64/
 gpgcheck=1
 enabled=1
 gpgkey=https://www.mongodb.org/static/pgp/server-${MONGODB_VERSION}.asc
 EOF
-        yum clean all
-        yum makecache
-        
-        # 检查MongoDB包是否可用
-        if ! yum list available --repo mongodb-org 2>/dev/null | grep -q mongodb-org; then
-            echo "错误: 无法从仓库获取MongoDB包，请检查:"
-            echo "1. 网络连接是否正常"
-            echo "2. MongoDB版本 ${MONGODB_VERSION} 是否支持当前系统版本"
-            echo "3. 仓库URL是否正确"
-            exit 1
-        fi
-        
-        # 获取最新版本号
-        LATEST_MONGO_VERSION=$(yum --showduplicates list mongodb-org 2>/dev/null | grep "${MONGODB_VERSION}" | tail -n 1 | awk '{print $2}' | cut -d'-' -f1)
-        
-        if [[ -z "$LATEST_MONGO_VERSION" ]]; then
-            echo "警告: 无法获取精确版本号，尝试安装mongodb-org..."
-            yum install -y mongodb-org
-        else
-            echo "找到 MongoDB 版本: $LATEST_MONGO_VERSION"
-            PACKAGELIST=(mongodb-org-${LATEST_MONGO_VERSION} mongodb-org-database-${LATEST_MONGO_VERSION} mongodb-org-server-${LATEST_MONGO_VERSION} mongodb-org-mongos-${LATEST_MONGO_VERSION} mongodb-org-tools-${LATEST_MONGO_VERSION})
-            for n in ${PACKAGELIST[@]}
-            do
-              if ! rpm -q ${n} >/dev/null 2>&1; then
-                  yum install -y ${n}
-              fi
-            done
-        fi
-        
-        # 安装mongosh
-        if yum list available mongodb-mongosh >/dev/null 2>&1; then
-            LATEST_MONGOSHELL_VERSION=$(yum --showduplicates list mongodb-mongosh 2>/dev/null | tail -n 1 | awk '{print $2}' | cut -d'-' -f1)
-            if [[ -n "$LATEST_MONGOSHELL_VERSION" ]] && ! rpm -q mongodb-mongosh-${LATEST_MONGOSHELL_VERSION} >/dev/null 2>&1; then
-                yum install -y mongodb-mongosh-${LATEST_MONGOSHELL_VERSION} || yum install -y mongodb-mongosh
-            fi
-        else
-            echo "注意: mongodb-mongosh 不可用，将使用旧版mongo shell"
-        fi
+        LATEST_MONGO_VERSION=$(yum --showduplicates list mongodb-org | grep "${MONGODB_VERSION}" | tail -n 1 | awk '{print $2}' | cut -d'-' -f1)
+        PACKAGELIST=(mongodb-org-${LATEST_MONGO_VERSION} mongodb-org-database-${LATEST_MONGO_VERSION} mongodb-org-server-${LATEST_MONGO_VERSION} mongodb-org-mongos-${LATEST_MONGO_VERSION} mongodb-org-tools-${LATEST_MONGO_VERSION})
+        for n in ${PACKAGELIST[@]}
+        do
+          rpm -q ${n} | grep -q "${n}" && yum install -y ${n}
+        done
+        LATEST_MONGOSHELL_VERSION=$(yum --showduplicates list mongodb-mongosh | grep "${MONGODB_VERSION}" | tail -n 1 | awk '{print $2}' | cut -d'-' -f1)
+        rpm -q mongodb-mongosh-${LATEST_MONGOSHELL_VERSION} | grep -q "mongodb-mongosh" && yum install -y mongodb-mongosh-${LATEST_MONGOSHELL_VERSION}
     fi
 }
 
