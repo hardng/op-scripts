@@ -25,7 +25,7 @@ MONGO_MON_PASS="$(openssl rand -base64 16 | tr -dc 'A-Za-z0-9')"
 PRIMARY_IP="127.0.0.1"  # Default to localhost for single host
 SECONDARY_IP="127.0.0.1"
 ARBITER_IP="127.0.0.1"
-PID_DIR="/data/mongodb"
+PID_DIR="/var/run/mongodb"
 PID_FILE="$PID_DIR/mongod.pid"
 MULTI_INSTANCE=false  # New flag to enable multi-instance on single host
 INSTANCE_NAME=""      # Instance-specific name for multi-instance mode
@@ -87,7 +87,7 @@ create_mongodb_user() {
 }
 
 install_mongodb() {
-    echo "安装 MongoDB..."
+    echo "安装 MongoDB ${MONGODB_VERSION}..."
     if [[ "$OS" == "debian" ]]; then
         apt-get update
         apt-get install -y gnupg wget
@@ -97,22 +97,122 @@ install_mongodb() {
         apt-get update
         apt-get install -y mongodb-org=${MONGODB_VERSION}*
     else
+        # 检测系统版本
+        if [[ -f /etc/os-release ]]; then
+            . /etc/os-release
+            RHEL_VERSION=${VERSION_ID%%.*}
+            OS_NAME=${ID}
+        else
+            RHEL_VERSION=$(grep -oE '[0-9]+' /etc/redhat-release | head -1)
+            OS_NAME="rhel"
+        fi
+        
+        echo "系统: ${OS_NAME} ${RHEL_VERSION}"
+        
+        # MongoDB 仓库路径映射
+        # Rocky/Alma 9 和其他 RHEL 9 系使用 RHEL 8 的仓库（因为 MongoDB 5.0/6.0 没有 RHEL 9 的独立仓库）
+        REPO_VERSION=$RHEL_VERSION
+        if [[ "$RHEL_VERSION" == "9" ]]; then
+            # MongoDB 5.0 和 6.0 没有 RHEL 9 仓库，使用 RHEL 8 仓库
+            if [[ "$MONGODB_VERSION" == "5.0" || "$MONGODB_VERSION" == "6.0" ]]; then
+                REPO_VERSION="8"
+                echo "注意: MongoDB ${MONGODB_VERSION} 使用 RHEL 8 兼容仓库"
+            fi
+        fi
+        
+        # 配置MongoDB仓库
         cat > /etc/yum.repos.d/mongodb-org.repo <<EOF
 [mongodb-org-${MONGODB_VERSION}]
 name=MongoDB Repository
-baseurl=https://repo.mongodb.org/yum/redhat/\$releasever/mongodb-org/${MONGODB_VERSION}/x86_64/
+baseurl=https://repo.mongodb.org/yum/redhat/${REPO_VERSION}/mongodb-org/${MONGODB_VERSION}/x86_64/
 gpgcheck=1
 enabled=1
 gpgkey=https://www.mongodb.org/static/pgp/server-${MONGODB_VERSION}.asc
 EOF
-        LATEST_MONGO_VERSION=$(yum --showduplicates list mongodb-org | grep "${MONGODB_VERSION}" | tail -n 1 | awk '{print $2}' | cut -d'-' -f1)
-        PACKAGELIST=(mongodb-org-${LATEST_MONGO_VERSION} mongodb-org-database-${LATEST_MONGO_VERSION} mongodb-org-server-${LATEST_MONGO_VERSION} mongodb-org-mongos-${LATEST_MONGO_VERSION} mongodb-org-tools-${LATEST_MONGO_VERSION})
-        for n in ${PACKAGELIST[@]}
-        do
-          rpm -q ${n} | grep -q "${n}" && yum install -y ${n}
-        done
-        LATEST_MONGOSHELL_VERSION=$(yum --showduplicates list mongodb-mongosh | grep "${MONGODB_VERSION}" | tail -n 1 | awk '{print $2}' | cut -d'-' -f1)
-        rpm -q mongodb-mongosh-${LATEST_MONGOSHELL_VERSION} | grep -q "mongodb-mongosh" && yum install -y mongodb-mongosh-${LATEST_MONGOSHELL_VERSION}
+        
+        echo "仓库配置: https://repo.mongodb.org/yum/redhat/${REPO_VERSION}/mongodb-org/${MONGODB_VERSION}/x86_64/"
+        
+        yum clean all
+        yum makecache
+        
+        echo "开始安装 MongoDB..."
+        
+        # MongoDB 7.0+ 使用 mongodb-org 和 mongodb-org-server
+        # MongoDB 5.0/6.0 使用带版本号的包名
+        # 尝试多种包名组合以适配不同版本
+        
+        INSTALL_SUCCESS=false
+        
+        # 策略1: 尝试安装主包 mongodb-org (适用于 7.0+)
+        echo "尝试方式1: 安装 mongodb-org..."
+        if yum install -y mongodb-org mongodb-org-server mongodb-org-mongos mongodb-org-tools 2>/dev/null; then
+            INSTALL_SUCCESS=true
+            echo "✓ 方式1成功"
+        fi
+        
+        # 策略2: 尝试带具体版本号的包名 (适用于 5.0/6.0)
+        if [[ "$INSTALL_SUCCESS" == "false" ]]; then
+            echo "尝试方式2: 安装带版本号的包..."
+            # 获取仓库中的实际版本号
+            AVAILABLE_VERSION=$(yum list available mongodb-org-server 2>/dev/null | grep mongodb-org-server | tail -1 | awk '{print $2}')
+            if [[ -n "$AVAILABLE_VERSION" ]]; then
+                echo "找到版本: $AVAILABLE_VERSION"
+                if yum install -y mongodb-org-server-${AVAILABLE_VERSION} mongodb-org-mongos-${AVAILABLE_VERSION} mongodb-org-tools-${AVAILABLE_VERSION} 2>/dev/null; then
+                    INSTALL_SUCCESS=true
+                    echo "✓ 方式2成功"
+                fi
+            fi
+        fi
+        
+        # 策略3: 列出所有包并尝试安装
+        if [[ "$INSTALL_SUCCESS" == "false" ]]; then
+            echo "尝试方式3: 查找并安装所有可用的MongoDB包..."
+            MONGO_PACKAGES=$(yum list available 2>/dev/null | grep "^mongodb-org" | grep -v "debuginfo\|devel" | awk '{print $1}' | tr '\n' ' ')
+            if [[ -n "$MONGO_PACKAGES" ]]; then
+                echo "找到包: $MONGO_PACKAGES"
+                if yum install -y $MONGO_PACKAGES 2>/dev/null; then
+                    INSTALL_SUCCESS=true
+                    echo "✓ 方式3成功"
+                fi
+            fi
+        fi
+        
+        if [[ "$INSTALL_SUCCESS" == "false" ]]; then
+            echo ""
+            echo "❌ 错误: 所有安装方式都失败了"
+            echo ""
+            echo "仓库中可用的MongoDB包:"
+            yum search mongodb-org 2>/dev/null | grep "^mongodb-org"
+            echo ""
+            echo "请检查:"
+            echo "1. 仓库URL: https://repo.mongodb.org/yum/redhat/${REPO_VERSION}/mongodb-org/${MONGODB_VERSION}/x86_64/"
+            echo "2. 网络连接: curl -I https://repo.mongodb.org"
+            echo "3. 尝试手动安装: yum install -y mongodb-org"
+            exit 1
+        fi
+        
+        # 安装shell客户端
+        echo "安装 MongoDB shell..."
+        if yum list available mongodb-mongosh >/dev/null 2>&1; then
+            yum install -y mongodb-mongosh 2>/dev/null || yum install -y mongodb-org-shell 2>/dev/null || echo "注意: shell客户端安装失败"
+        else
+            yum install -y mongodb-org-shell 2>/dev/null || echo "注意: shell客户端安装失败"
+        fi
+    fi
+    
+    # 验证安装
+    if ! command -v mongod >/dev/null 2>&1; then
+        echo "❌ 错误: mongod 未安装成功"
+        exit 1
+    fi
+    
+    echo "✓ MongoDB 安装成功"
+    mongod --version | head -1
+    
+    if command -v mongosh >/dev/null 2>&1; then
+        echo "✓ Shell: mongosh"
+    elif command -v mongo >/dev/null 2>&1; then
+        echo "✓ Shell: mongo"
     fi
 }
 

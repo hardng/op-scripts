@@ -65,4 +65,4 @@ fi
 
 # 执行对应脚本
 # 如果没参数，让脚本自己输出 usage 或错误
-curl -sL "${BASE_RAW_URL}/${SCRIPT_NAME}.sh" | bash -s -- "$@"
+curl -sL "${BASE_RAW_URL}/${SCRIPT_NAME}.sh?nocache=$(date +%s)" | bash -s -- "$@"
