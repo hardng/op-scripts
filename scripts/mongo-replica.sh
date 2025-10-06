@@ -7,7 +7,7 @@
 set -e
 
 # Default values
-MONGODB_VERSION="7.0"
+MONGODB_VERSION="5.0"
 DATA_DIR=""
 ROLE=""
 REPLICA_SET_NAME="rs0"
@@ -19,9 +19,9 @@ SERVICE_FILE="/etc/systemd/system/mongod.service"
 PROMETHEUS_EXPORTER_PORT=9216
 MONGODB_USER="mongo"
 MONGO_ADMIN_USER="admin"
-MONGO_ADMIN_PASS="AYT6QRKhoiUpMotskhzW"
+MONGO_ADMIN_PASS="$(openssl rand -base64 16 | tr -dc 'A-Za-z0-9')"
 MONGO_MON_USER="exporter"
-MONGO_MON_PASS="m7pX3ucRmVUJnpFL7N44"
+MONGO_MON_PASS="$(openssl rand -base64 16 | tr -dc 'A-Za-z0-9')"
 PRIMARY_IP="127.0.0.1"  # Default to localhost for single host
 SECONDARY_IP="127.0.0.1"
 ARBITER_IP="127.0.0.1"
