@@ -225,7 +225,7 @@ create_systemd_service() {
     if [[ -n "$redis_password" ]]; then
         # Create password file for security
         local password_file="/etc/redis_exporter_password"
-        echo "$redis_password" > "$password_file"
+        echo "{ \"redis://${redis_addr}\": \"${redis_password}\" }" > "$password_file"
         chmod 600 "$password_file"
         chown "$REDIS_EXPORTER_USER:$REDIS_EXPORTER_GROUP" "$password_file"
         exec_start="$exec_start -redis.password-file=$password_file"
