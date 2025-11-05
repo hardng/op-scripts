@@ -166,10 +166,20 @@ main() {
 
     # Copy Nacos config to host
     echo -e "\033[32m#################### Copying Nacos config to host... ####################\033[0m"
-    docker run --rm -d --name temp-nacos nacos/nacos-server:v${NACOS_VERSION}
-    sleep 5
-    docker cp temp-nacos:/home/nacos/conf/. $NACOS_CONF_DIR
-    docker stop temp-nacos
+    docker run -d --name temp-nacos nacos/nacos-server:v${NACOS_VERSION} || true
+    sleep 10
+
+    if docker ps -a | grep -q temp-nacos; then
+        echo "Container temp-nacos found, copying config..."
+        docker cp temp-nacos:/home/nacos/conf/. $NACOS_CONF_DIR
+        docker stop temp-nacos
+        docker rm temp-nacos
+    else
+        echo "⚠️ temp-nacos container not found. Trying manual config download..."
+        mkdir -p $NACOS_CONF_DIR
+        curl -sL https://raw.githubusercontent.com/alibaba/nacos/${NACOS_VERSION}/distribution/conf/application.properties -o $NACOS_CONF_DIR/application.properties || true
+    fi
+
     echo -e "\033[32m#################### Nacos config copied successfully ####################\033[0m"
 
     # Modify configurations
