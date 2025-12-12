@@ -162,8 +162,34 @@ check_requirements() {
     fi
     
     # Check internet connectivity
-    if ! ping -c 1 google.com &> /dev/null; then
-        log "ERROR" "No internet connection detected. Internet access is required for installation."
+    # Check internet connectivity
+    log "INFO" "Checking internet connectivity..."
+    local connectivity_ok=false
+    local check_hosts=("google.com" "1.1.1.1" "baidu.com" "microsoft.com")
+    
+    # Method 1: Ping check
+    for host in "${check_hosts[@]}"; do
+        if ping -c 1 -W 2 "$host" &> /dev/null; then
+            log "INFO" "Connectivity confirmed via ping to $host"
+            connectivity_ok=true
+            break
+        fi
+    done
+    
+    # Method 2: TCP Port 80 check (if ping fails)
+    if [[ $connectivity_ok == false ]]; then
+        log "INFO" "Ping failed, trying TCP port 80 connection..."
+        for host in "google.com" "www.baidu.com" "www.microsoft.com"; do
+            if timeout 3 bash -c "echo > /dev/tcp/$host/80" 2>/dev/null; then
+                log "INFO" "Connectivity confirmed via TCP/80 to $host"
+                connectivity_ok=true
+                break
+            fi
+        done
+    fi
+
+    if [[ $connectivity_ok == false ]]; then
+        log "ERROR" "No internet connection detected. Tried ping and TCP/80 to multiple global hosts."
         exit 1
     fi
     
@@ -186,6 +212,7 @@ update_packages() {
                 sudo yum makecache fast
             fi
             ;;
+
     esac
     
     log "INFO" "Package repositories updated successfully."
@@ -212,6 +239,12 @@ install_prerequisites() {
                 curl \
                 ca-certificates
             ;;
+        amzn)
+            sudo $PKG_MANAGER install -y \
+                device-mapper-persistent-data \
+                lvm2 \
+                ca-certificates
+            ;;        
     esac
     
     log "INFO" "Prerequisites installed successfully."
