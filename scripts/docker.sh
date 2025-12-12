@@ -260,12 +260,19 @@ install_prerequisites() {
     
     local required_packages=()
     
+    # Special handling for curl (check command instead of package)
+    if ! command -v curl &> /dev/null; then
+        log "INFO" "curl command missing, adding to install list."
+        required_packages+=("curl")
+    else
+        log "INFO" "curl command is available."
+    fi
+    
     case $OS_FAMILY in
         debian)
-            required_packages=(
+            required_packages+=(
                 "apt-transport-https"
                 "ca-certificates"
-                "curl"
                 "gnupg"
                 "lsb-release"
                 "software-properties-common"
@@ -274,17 +281,15 @@ install_prerequisites() {
         rhel)
             if [[ "$DISTRO_ID" == "amzn" ]]; then
                 # Amazon Linux specific packages
-                required_packages=(
+                required_packages+=(
                     "device-mapper-persistent-data"
                     "lvm2"
                     "ca-certificates"
-                    "curl" # Required for later steps
                 )
             else
-                required_packages=(
+                required_packages+=(
                     "device-mapper-persistent-data"
                     "lvm2"
-                    "curl"
                     "ca-certificates"
                 )
             fi
