@@ -52,7 +52,7 @@ detect_os() {
 install_deps() {
     echo "📦 Installing required dependencies..."
     case "$OS" in
-        centos|rocky|almalinux|rhel|alinux|amzn)
+        centos|rocky|almalinux|rhel|alinux)
             yum install -y curl tar systemd
             ;;
         amzn)
