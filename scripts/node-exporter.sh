@@ -55,6 +55,9 @@ install_deps() {
         centos|rocky|almalinux|rhel|alinux|amzn)
             yum install -y curl tar systemd
             ;;
+        amzn)
+            yum install -y tar systemd
+            ;;
         ubuntu|debian)
             apt-get update -y
             apt-get install -y curl tar systemd
