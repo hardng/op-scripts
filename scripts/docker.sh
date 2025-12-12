@@ -8,11 +8,11 @@
 set -e
 
 # Color codes for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+RED=$'\033[0;31m'
+GREEN=$'\033[0;32m'
+YELLOW=$'\033[1;33m'
+BLUE=$'\033[0;34m'
+NC=$'\033[0m' # No Color
 
 # Global variables
 SCRIPT_NAME=$(basename "$0")
@@ -21,35 +21,38 @@ LOG_FILE="/tmp/docker_install_$(date +%Y%m%d_%H%M%S).log"
 
 # Function to display usage information
 usage() {
-    echo -e "${BLUE}Usage: $SCRIPT_NAME [OPTIONS]${NC}"
-    echo ""
-    echo -e "${YELLOW}Description:${NC}"
-    echo "  Universal script to install Docker and Docker Compose on Ubuntu/Debian and Rocky/CentOS systems"
-    echo ""
-    echo -e "${YELLOW}Options:${NC}"
-    echo "  -h, --help              Show this help message and exit"
-    echo "  -d, --docker-only       Install Docker only (skip Docker Compose)"
-    echo "  -c, --compose-only      Install Docker Compose only (requires Docker to be installed)"
-    echo "  -v, --version VERSION   Specify Docker Compose version (default: $DOCKER_COMPOSE_VERSION)"
-    echo "  -u, --user USERNAME     Add specified user to docker group (default: current user)"
-    echo "  --uninstall             Uninstall Docker and Docker Compose"
-    echo "  --dry-run               Show what would be installed without actually installing"
-    echo ""
-    echo -e "${YELLOW}Examples:${NC}"
-    echo "  $SCRIPT_NAME                    # Install both Docker and Docker Compose"
-    echo "  $SCRIPT_NAME -d                 # Install Docker only"
-    echo "  $SCRIPT_NAME -c                 # Install Docker Compose only"
-    echo "  $SCRIPT_NAME -v v2.20.0         # Install with specific Docker Compose version"
-    echo "  $SCRIPT_NAME -u myuser          # Add 'myuser' to docker group"
-    echo "  $SCRIPT_NAME --uninstall        # Uninstall Docker and Docker Compose"
-    echo ""
-    echo -e "${YELLOW}Supported Systems:${NC}"
-    echo "  - Ubuntu 18.04, 20.04, 22.04, 24.04"
-    echo "  - Debian 9, 10, 11, 12"
-    echo "  - CentOS 7, 8, 9"
-    echo "  - Rocky Linux 8, 9"
-    echo "  - AlmaLinux 8, 9"
-    echo ""
+    cat << EOF
+${BLUE}Usage: $SCRIPT_NAME [OPTIONS]${NC}
+
+${YELLOW}Description:${NC}
+  Universal script to install Docker and Docker Compose on Ubuntu/Debian and Rocky/CentOS systems
+
+${YELLOW}Options:${NC}
+  -h, --help              Show this help message and exit
+  -d, --docker-only       Install Docker only (skip Docker Compose)
+  -c, --compose-only      Install Docker Compose only (requires Docker to be installed)
+  -v, --version VERSION   Specify Docker Compose version (default: $DOCKER_COMPOSE_VERSION)
+  -u, --user USERNAME     Add specified user to docker group (default: current user)
+  --uninstall             Uninstall Docker and Docker Compose
+  --dry-run               Show what would be installed without actually installing
+
+${YELLOW}Examples:${NC}
+  $SCRIPT_NAME                    # Install both Docker and Docker Compose
+  $SCRIPT_NAME -d                 # Install Docker only
+  $SCRIPT_NAME -c                 # Install Docker Compose only
+  $SCRIPT_NAME -v v2.20.0         # Install with specific Docker Compose version
+  $SCRIPT_NAME -u myuser          # Add 'myuser' to docker group
+  $SCRIPT_NAME --uninstall        # Uninstall Docker and Docker Compose
+
+${YELLOW}Supported Systems:${NC}
+  - Ubuntu 18.04, 20.04, 22.04, 24.04
+  - Debian 9, 10, 11, 12
+  - CentOS 7, 8, 9
+  - Rocky Linux 8, 9
+  - AlmaLinux 8, 9
+  - Amazon Linux 2023
+
+EOF
     exit 0
 }
 
@@ -105,13 +108,14 @@ detect_os() {
             OS_FAMILY="debian"
             PKG_MANAGER="apt"
             ;;
-        centos|rhel|rocky|almalinux)
+        centos|rhel|rocky|almalinux|amzn)
             OS_FAMILY="rhel"
             PKG_MANAGER="yum"
             # Use dnf for newer versions (CentOS 8+, Rocky 8+, AlmaLinux 8+)
             if [[ ( "$DISTRO_ID" == "centos" && "${VER%%.*}" -ge "8" ) ]] || \
                [[ ( "$DISTRO_ID" == "rocky" && "${VER%%.*}" -ge "8" ) ]] || \
                [[ ( "$DISTRO_ID" == "almalinux" && "${VER%%.*}" -ge "8" ) ]] || \
+               [[ ( "$DISTRO_ID" == "amzn" && "${VER%%.*}" -ge "8" ) ]] || \
                [[ "$DISTRO_ID" == "rhel" && "${VER%%.*}" -ge "8" ]]; then
                 if command -v dnf &> /dev/null; then
                     PKG_MANAGER="dnf"
