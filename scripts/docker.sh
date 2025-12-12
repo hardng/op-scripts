@@ -131,6 +131,42 @@ detect_os() {
     log "INFO" "OS Family: $OS_FAMILY, Package Manager: $PKG_MANAGER"
 }
 
+# Function to check if a package is installed
+is_package_installed() {
+    local package=$1
+    
+    case $OS_FAMILY in
+        debian)
+            dpkg -s "$package" &> /dev/null
+            ;;
+        rhel)
+            rpm -q "$package" &> /dev/null
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+# Function to check and install a single package
+check_and_install_package() {
+    local package=$1
+    
+    if is_package_installed "$package"; then
+        log "INFO" "Package '$package' is already installed."
+    else
+        log "INFO" "Package '$package' is missing. Installing..."
+        case $OS_FAMILY in
+            debian)
+                sudo apt-get install -y "$package"
+                ;;
+            rhel)
+                sudo $PKG_MANAGER install -y "$package"
+                ;;
+        esac
+    fi
+}
+
 # Function to check system requirements
 check_requirements() {
     log "INFO" "Checking system requirements..."
@@ -222,37 +258,59 @@ update_packages() {
 install_prerequisites() {
     log "INFO" "Installing prerequisites..."
     
+    local required_packages=()
+    
     case $OS_FAMILY in
         debian)
-            sudo apt-get install -y \
-                apt-transport-https \
-                ca-certificates \
-                curl \
-                gnupg \
-                lsb-release \
-                software-properties-common
+            required_packages=(
+                "apt-transport-https"
+                "ca-certificates"
+                "curl"
+                "gnupg"
+                "lsb-release"
+                "software-properties-common"
+            )
             ;;
         rhel)
-            sudo $PKG_MANAGER install -y \
-                device-mapper-persistent-data \
-                lvm2 \
-                curl \
-                ca-certificates
+            if [[ "$DISTRO_ID" == "amzn" ]]; then
+                # Amazon Linux specific packages
+                required_packages=(
+                    "device-mapper-persistent-data"
+                    "lvm2"
+                    "ca-certificates"
+                    "curl" # Required for later steps
+                )
+            else
+                required_packages=(
+                    "device-mapper-persistent-data"
+                    "lvm2"
+                    "curl"
+                    "ca-certificates"
+                )
+            fi
             ;;
-        amzn)
-            sudo $PKG_MANAGER install -y \
-                device-mapper-persistent-data \
-                lvm2 \
-                ca-certificates
-            ;;        
     esac
     
-    log "INFO" "Prerequisites installed successfully."
+    # Loop through packages and check/install each one
+    for pkg in "${required_packages[@]}"; do
+        check_and_install_package "$pkg"
+    done
+    
+    log "INFO" "Prerequisites check/installation completed."
 }
 
 # Function to install Docker
 install_docker() {
     log "INFO" "Installing Docker..."
+    
+    # Define Docker packages
+    local docker_packages=(
+        "docker-ce"
+        "docker-ce-cli"
+        "containerd.io"
+        "docker-buildx-plugin"
+        "docker-compose-plugin"
+    )
     
     case $OS_FAMILY in
         debian)
@@ -264,9 +322,6 @@ install_docker() {
             
             # Update package index
             sudo apt-get update -y
-            
-            # Install Docker
-            sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
             ;;
         rhel)
             # Add Docker repository
@@ -293,15 +348,13 @@ enabled=0
 gpgcheck=1
 gpgkey=https://download.docker.com/linux/centos/gpg
 EOF
-            
-            # Install Docker
-            if [[ $PKG_MANAGER == "dnf" ]]; then
-                sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-            else
-                sudo yum install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-            fi
             ;;
     esac
+    
+    # Install Docker packages
+    for pkg in "${docker_packages[@]}"; do
+        check_and_install_package "$pkg"
+    done
     
     # Start and enable Docker service
     sudo systemctl start docker
