@@ -108,7 +108,7 @@ detect_os() {
             OS_FAMILY="debian"
             PKG_MANAGER="apt"
             ;;
-        centos|rhel|rocky|almalinux|amzn)
+        centos|rhel|rocky|almalinux|amzn|alinux)
             OS_FAMILY="rhel"
             PKG_MANAGER="yum"
             # Use dnf for newer versions (CentOS 8+, Rocky 8+, AlmaLinux 8+)
@@ -116,6 +116,7 @@ detect_os() {
                [[ ( "$DISTRO_ID" == "rocky" && "${VER%%.*}" -ge "8" ) ]] || \
                [[ ( "$DISTRO_ID" == "almalinux" && "${VER%%.*}" -ge "8" ) ]] || \
                [[ ( "$DISTRO_ID" == "amzn" && "${VER%%.*}" -ge "8" ) ]] || \
+               [[ ( "$DISTRO_ID" == "alinux" && "${VER%%.*}" -ge "8" ) ]] || \
                [[ "$DISTRO_ID" == "rhel" && "${VER%%.*}" -ge "8" ]]; then
                 if command -v dnf &> /dev/null; then
                     PKG_MANAGER="dnf"
