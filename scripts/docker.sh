@@ -246,7 +246,7 @@ update_packages() {
             if [[ $PKG_MANAGER == "dnf" ]]; then
                 sudo dnf makecache
             else
-                sudo yum makecache fast
+                sudo yum makecache
             fi
             ;;
 
