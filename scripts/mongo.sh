@@ -14,6 +14,7 @@ REPLICA_SET_NAME="rs0"
 PRIMARY_PORT=27017
 SECONDARY_PORT=27018
 ARBITER_PORT=27019
+CONFIG_DIR="/etc"
 CONFIG_FILE="/etc/mongod.conf"
 SERVICE_FILE="/etc/systemd/system/mongod.service"
 PROMETHEUS_EXPORTER_PORT=9216
@@ -35,49 +36,96 @@ STANDALONE_PORT=27017 # Default port for standalone mode
 EXPORTER_INSTALL_DIR="/usr/share/mongodb_exporter"
 EXPORTER_TEMP_DIR="/tmp/mongodb_exporter"
 
+# Color definitions
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m' # No Color
+
+# Log level functions
+log_info() {
+    echo -e "${BLUE}[INFO]${NC} $*"
+}
+
+log_success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $*"
+}
+
+log_warn() {
+    echo -e "${YELLOW}[WARN]${NC} $*"
+}
+
+log_error() {
+    echo -e "${RED}[ERROR]${NC} $*"
+}
+
 usage() {
-    echo "Usage: $0 <subcommand> [options]"
-    echo ""
-    echo "Subcommands:"
-    echo "  install        Install MongoDB and Prometheus exporter"
-    echo "  init-replica   Initialize MongoDB replica set"
-    echo "  config-auth    Configure replica set authentication"
-    echo "  exporter       Manage Prometheus exporter (install|uninstall|upgrade)"
-    echo ""
-    echo "install options:"
-    echo "  --data-dir <path>                   Data directory path"
-    echo "  --mongodb-version <version>         MongoDB version (default: $MONGODB_VERSION)"
-    echo "  --multi-instance                    Enable multi-instance mode on single host"
-    echo "  --standalone                        Deploy standalone mode (no replica set)"
-    echo "  --port <port>                       Port for standalone mode (default: $STANDALONE_PORT)"
-    echo ""
-    echo "init-replica, config-auth and install options:"
-    echo "  --role <primary|secondary|arbiter>  Specify node role (not needed for standalone)"
-    echo "  --data-dir <path>                   Data directory path"
-    echo "  --primary-ip <IP>                   Primary node IP (default: $PRIMARY_IP)"
-    echo "  --secondary-ip <IP>                 Secondary node IP (default: $SECONDARY_IP)"
-    echo "  --arbiter-ip <IP>                   Arbiter node IP (default: $ARBITER_IP)"
-    echo ""
-    echo "exporter subcommand:"
-    echo "  $0 exporter install [--primary-ip <IP>] [--secondary-ip <IP>] [--port <port>]"
-    echo "  $0 exporter uninstall"
-    echo "  $0 exporter upgrade [--version <version>]"
-    echo ""
-    echo "Examples:"
-    echo "  # Deploy standalone MongoDB"
-    echo "  $0 install --standalone --data-dir /data/mongodb"
-    echo ""
-    echo "  # Deploy replica set primary node"
-    echo "  $0 install --role primary --data-dir /data/mongodb --primary-ip 192.168.1.10 --secondary-ip 192.168.1.11 --arbiter-ip 192.168.1.12"
-    echo ""
-    echo "  # Install MongoDB exporter"
-    echo "  $0 exporter install --primary-ip 192.168.1.10 --secondary-ip 192.168.1.11"
-    echo ""
-    echo "  # Uninstall MongoDB exporter"
-    echo "  $0 exporter uninstall"
-    echo ""
-    echo "  # Upgrade MongoDB exporter"
-    echo "  $0 exporter upgrade --version 0.45.0"
+    cat <<EOF
+Usage: $0 <subcommand> [options]
+
+Subcommands:
+  install        Install MongoDB and Prometheus exporter
+  init-replica   Initialize MongoDB replica set
+  config-auth    Configure replica set authentication
+  upgrade-mongo  Upgrade MongoDB to a minor version
+  exporter       Manage Prometheus exporter (install|uninstall|upgrade)
+
+install options:
+  --data-dir <path>                   Data directory path
+  --mongodb-version <version>         MongoDB version (default: $MONGODB_VERSION)
+  --multi-instance                    Enable multi-instance mode on single host
+  --standalone                        Deploy standalone mode (no replica set)
+  --port <port>                       Port for standalone mode (default: $STANDALONE_PORT)
+
+init-replica and config-auth options:
+  --role <primary|secondary|arbiter>  Specify node role
+  --data-dir <path>                   Data directory path
+  --primary-ip <IP>                   Primary node IP (default: $PRIMARY_IP)
+  --secondary-ip <IP>                 Secondary node IP (default: $SECONDARY_IP)
+  --arbiter-ip <IP>                   Arbiter node IP (default: $ARBITER_IP)
+
+upgrade-mongo options:
+  --mongodb-version <version>         Target MongoDB version (e.g., 5.0.12)
+  --auto                              Auto-detect and upgrade to latest available version
+  --config-dir <path>                 Config directory path (default: /etc)
+  --multi-instance                    Upgrade multi-instance deployment
+  --instance-name <name>              Instance name for multi-instance mode
+
+exporter subcommand:
+  $0 exporter install [--primary-ip <IP>] [--secondary-ip <IP>] [--port <port>]
+  $0 exporter uninstall
+  $0 exporter upgrade [--version <version>]
+
+Examples:
+  # Deploy standalone MongoDB
+  $0 install --standalone --data-dir /data/mongodb
+
+  # Deploy replica set primary node
+  $0 install --role primary --data-dir /data/mongodb --primary-ip 192.168.1.10 --secondary-ip 192.168.1.11 --arbiter-ip 192.168.1.12
+
+  # Install MongoDB exporter
+  $0 exporter install --primary-ip 192.168.1.10 --secondary-ip 192.168.1.11
+
+  # Uninstall MongoDB exporter
+  $0 exporter uninstall
+
+  # Upgrade MongoDB exporter
+  $0 exporter upgrade --version 0.45.0
+
+  # Upgrade MongoDB to a minor version
+  $0 upgrade-mongo --mongodb-version 5.0.12
+
+  # Auto-detect and upgrade to latest available version
+  $0 upgrade-mongo --auto
+
+  # Upgrade MongoDB with custom config directory
+  $0 upgrade-mongo --mongodb-version 5.0.12 --config-dir /data/mongodb/config
+
+  # Upgrade multi-instance MongoDB
+  $0 upgrade-mongo --mongodb-version 5.0.12 --multi-instance --instance-name primary --config-dir /data/mongodb/config
+EOF
     exit 1
 }
 
@@ -1017,6 +1065,257 @@ config_auth() {
     echo "Authentication configuration completed, node role: $ROLE. Exporter running on port $PROMETHEUS_EXPORTER_PORT."
 }
 
+upgrade_mongodb() {
+    local NEW_VERSION=""
+    local INSTANCE_NAME=""
+    local CONFIG_DIR="/etc"
+    local AUTO_DETECT=false
+    
+    while [[ "$#" -gt 0 ]]; do
+        case $1 in
+            --mongodb-version) NEW_VERSION="$2"; shift ;;
+            --config-dir) CONFIG_DIR="$2"; shift ;;
+            --multi-instance) MULTI_INSTANCE=true ;;
+            --instance-name) INSTANCE_NAME="$2"; shift ;;
+            --auto) AUTO_DETECT=true ;;
+            *) log_error "Unknown option: $1"; usage ;;
+        esac
+        shift
+    done
+    
+    # Detect OS
+    check_os
+    
+    # Get current version
+    local current_version=""
+    local current_major_version=""
+    if command -v mongod >/dev/null 2>&1; then
+        current_version=$(mongod --version | head -1 | grep -oP 'v\K[0-9.]+')
+        current_major_version="${current_version%.*}"  # Extract major version like 5.0
+        log_info "Current MongoDB version: ${current_version:-unknown}"
+    else
+        log_error "mongod not found, please install MongoDB first"
+        exit 1
+    fi
+    
+    # Auto-detect latest available version if --auto flag is used or no version specified
+    if [[ -z "$NEW_VERSION" ]] || [[ "$AUTO_DETECT" == "true" ]]; then
+        log_info "Querying available MongoDB versions from repository..."
+        
+        local available_versions=""
+        if [[ "$OS" == "debian" ]]; then
+            # Update apt cache
+            apt-get update >/dev/null 2>&1
+            # Get available versions for current major version
+            available_versions=$(apt-cache madison mongodb-org-server 2>/dev/null | grep "${current_major_version}" | awk '{print $3}' | grep -oP '^[0-9]+\.[0-9]+\.[0-9]+' | sort -V | tail -5)
+        else
+            # For CentOS/RHEL
+            yum clean all >/dev/null 2>&1
+            yum makecache >/dev/null 2>&1
+            # Get available versions
+            available_versions=$(yum list available mongodb-org-server --showduplicates 2>/dev/null | grep "${current_major_version}" | awk '{print $2}' | grep -oP '^[0-9]+\.[0-9]+\.[0-9]+' | sort -V | tail -5)
+        fi
+        
+        if [[ -z "$available_versions" ]]; then
+            log_warn "Could not query available versions from repository"
+            if [[ -z "$NEW_VERSION" ]]; then
+                log_error "Please specify target version with --mongodb-version"
+                exit 1
+            fi
+        else
+            local latest_version=$(echo "$available_versions" | tail -1)
+            log_success "Found available versions for ${current_major_version}.x series:"
+            echo "$available_versions" | while read -r ver; do
+                if [[ "$ver" == "$current_version" ]]; then
+                    log_info "  $ver (current)"
+                elif [[ "$ver" == "$latest_version" ]]; then
+                    log_success "  $ver (latest)"
+                else
+                    log_info "  $ver"
+                fi
+            done
+            
+            if [[ -z "$NEW_VERSION" ]]; then
+                NEW_VERSION="$latest_version"
+                log_success "Auto-selected latest version: $NEW_VERSION"
+            fi
+            
+            # Check if current version is already the latest
+            if [[ "$current_version" == "$latest_version" ]]; then
+                log_success "MongoDB is already at the latest available version ($current_version)"
+                log_info "No upgrade needed"
+                exit 0
+            fi
+        fi
+    fi
+    
+    # Validate that NEW_VERSION is set
+    if [[ -z "$NEW_VERSION" ]]; then
+        log_error "upgrade-mongo requires --mongodb-version parameter or --auto flag"
+        log_info "Examples:"
+        log_info "  $0 upgrade-mongo --mongodb-version 5.0.12"
+        log_info "  $0 upgrade-mongo --auto"
+        exit 1
+    fi
+    
+    log_info "Preparing to upgrade to MongoDB ${NEW_VERSION}..."
+    
+    # Determine config file path and service name
+    local config_file="${CONFIG_DIR}/mongod.conf"
+    local service_name="mongod"
+    if [[ "$MULTI_INSTANCE" == "true" && -n "$INSTANCE_NAME" ]]; then
+        config_file="${CONFIG_DIR}/mongod-${INSTANCE_NAME}.conf"
+        service_name="mongod-${INSTANCE_NAME}"
+    fi
+    
+    # Check if config file exists
+    if [[ ! -f "$config_file" ]]; then
+        log_warn "Config file does not exist: $config_file"
+        log_warn "Will continue upgrade, but please confirm service name is correct: $service_name"
+    fi
+    
+    # Stop MongoDB service
+    log_info "Stopping MongoDB service: $service_name..."
+    if systemctl is-active "$service_name" >/dev/null 2>&1; then
+        systemctl stop "$service_name"
+        log_success "Service stopped"
+    else
+        log_warn "Service $service_name is not running"
+    fi
+    
+    # Check if MongoDB was installed via package manager
+    log_info "Checking MongoDB installation method..."
+    local installed_via_package=false
+    
+    if [[ "$OS" == "debian" ]]; then
+        if dpkg -l | grep -q "^ii.*mongodb-org"; then
+            installed_via_package=true
+            log_success "Detected MongoDB installed via apt package manager"
+        fi
+    else
+        if rpm -qa | grep -q "mongodb-org"; then
+            installed_via_package=true
+            log_success "Detected MongoDB installed via yum/dnf package manager"
+        fi
+    fi
+    
+    if [[ "$installed_via_package" == "false" ]]; then
+        echo ""
+        log_error "MongoDB does not appear to be installed via package manager"
+        echo ""
+        log_info "This upgrade script only supports MongoDB installed via:"
+        log_info "  - Debian/Ubuntu: apt (mongodb-org packages)"
+        log_info "  - CentOS/RHEL: yum/dnf (mongodb-org packages)"
+        echo ""
+        log_info "If MongoDB was installed via:"
+        log_info "  - Binary tarball: Please upgrade manually by downloading new binaries"
+        log_info "  - Source compilation: Please recompile with the new version"
+        log_info "  - Other methods: Please refer to MongoDB documentation"
+        echo ""
+        log_info "Current mongod location: $(which mongod)"
+        echo ""
+        # Restart the service before exiting
+        if systemctl is-active "$service_name" >/dev/null 2>&1; then
+            log_info "Service is already running"
+        else
+            log_info "Restarting original service..."
+            systemctl start "$service_name"
+        fi
+        exit 1
+    fi
+    
+    # Upgrade MongoDB based on OS
+    log_info "Starting MongoDB package upgrade..."
+    
+    if [[ "$OS" == "debian" ]]; then
+        # Debian/Ubuntu system
+        MONGODB_VERSION="${NEW_VERSION%.*}"  # Extract major version, e.g., 5.0
+        
+        # Update repository
+        apt-get update
+        
+        # Upgrade MongoDB packages
+        if apt-get install -y --only-upgrade mongodb-org=${NEW_VERSION}* mongodb-org-server=${NEW_VERSION}* mongodb-org-mongos=${NEW_VERSION}* mongodb-org-tools=${NEW_VERSION}*; then
+            log_success "MongoDB packages upgraded successfully"
+        else
+            log_error "MongoDB package upgrade failed"
+            log_info "Attempting to start original service..."
+            systemctl start "$service_name"
+            exit 1
+        fi
+    else
+        # CentOS/RHEL system
+        MONGODB_VERSION="${NEW_VERSION%.*}"  # Extract major version, e.g., 5.0
+        
+        # Detect system version
+        if [[ -f /etc/os-release ]]; then
+            . /etc/os-release
+            RHEL_VERSION=${VERSION_ID%%.*}
+        else
+            RHEL_VERSION=$(grep -oE '[0-9]+' /etc/redhat-release | head -1)
+        fi
+        
+        # RHEL 9 uses RHEL 8 repository
+        REPO_VERSION=$RHEL_VERSION
+        if [[ "$RHEL_VERSION" == "9" ]]; then
+            if [[ "$MONGODB_VERSION" == "5.0" || "$MONGODB_VERSION" == "6.0" ]]; then
+                REPO_VERSION="8"
+            fi
+        fi
+        
+        # Clean cache
+        yum clean all
+        yum makecache
+        
+        # Upgrade MongoDB packages
+        if yum update -y mongodb-org-${NEW_VERSION}* mongodb-org-server-${NEW_VERSION}* mongodb-org-mongos-${NEW_VERSION}* mongodb-org-tools-${NEW_VERSION}*; then
+            log_success "MongoDB packages upgraded successfully"
+        elif yum update -y mongodb-org mongodb-org-server mongodb-org-mongos mongodb-org-tools; then
+            log_success "MongoDB packages upgraded successfully (using latest available version)"
+        else
+            log_error "MongoDB package upgrade failed"
+            log_info "Attempting to start original service..."
+            systemctl start "$service_name"
+            exit 1
+        fi
+    fi
+    
+    # Start MongoDB service
+    log_info "Starting MongoDB service: $service_name..."
+    systemctl start "$service_name"
+    
+    # Wait for service to start
+    sleep 3
+    
+    # Check service status
+    if systemctl is-active "$service_name" >/dev/null 2>&1; then
+        log_success "Service started successfully"
+    else
+        log_error "Service failed to start, please check logs: journalctl -u $service_name"
+        exit 1
+    fi
+    
+    # Verify upgraded version
+    local upgraded_version=$(mongod --version | head -1 | grep -oP 'v\K[0-9.]+')
+    
+    echo ""
+    log_success "MongoDB upgrade completed"
+    log_info "  Previous version: ${current_version:-unknown}"
+    log_info "  Current version: ${upgraded_version:-unknown}"
+    
+    if [[ "$upgraded_version" == "$NEW_VERSION" ]]; then
+        log_success "  Verification: Version matched"
+    else
+        log_warn "  Verification: Version mismatch (expected: $NEW_VERSION, actual: $upgraded_version)"
+    fi
+    
+    echo ""
+    log_info "Recommendations:"
+    log_info "  1. Check service status: systemctl status $service_name"
+    log_info "  2. View logs: journalctl -u $service_name -n 50"
+    log_info "  3. Connect to database to verify functionality"
+}
+
 main() {
     if [[ $# -lt 1 ]]; then
         usage
@@ -1032,6 +1331,9 @@ main() {
             ;;
         config-auth)
             config_auth "$@"
+            ;;
+        upgrade-mongo)
+            upgrade_mongodb "$@"
             ;;
         exporter)
             manage_exporter "$@"
