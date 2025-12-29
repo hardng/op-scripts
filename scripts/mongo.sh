@@ -90,6 +90,7 @@ upgrade-mongo options:
   --mongodb-version <version>         Target MongoDB version (e.g., 5.0.12)
   --auto                              Auto-detect and upgrade to latest available version
   --mongod-path <path>                Path to mongod binary (for binary installations)
+  --service-name <name>               Systemd service name (default: mongod)
   --config-dir <path>                 Config directory path (default: /etc)
   --multi-instance                    Upgrade multi-instance deployment
   --instance-name <name>              Instance name for multi-instance mode
@@ -123,6 +124,9 @@ Examples:
 
   # Upgrade binary installation with custom mongod path
   $0 upgrade-mongo --mongodb-version 5.0.12 --mongod-path /usr/local/mongodb/bin/mongod
+
+  # Upgrade binary installation with custom service name
+  $0 upgrade-mongo --mongodb-version 5.0.12 --mongod-path /usr/local/mongo-03/bin/mongod --service-name mongod-03
 
   # Upgrade MongoDB with custom config directory
   $0 upgrade-mongo --mongodb-version 5.0.12 --config-dir /data/mongodb/config
@@ -1076,6 +1080,17 @@ upgrade_mongodb_binary() {
     
     log_info "Starting binary MongoDB upgrade process..."
     
+    # Stop service FIRST to avoid "Text file busy" error
+    log_info "Stopping MongoDB service: $service_name..."
+    if systemctl is-active "$service_name" >/dev/null 2>&1; then
+        systemctl stop "$service_name"
+        log_success "Service stopped"
+        # Wait a bit to ensure process is fully stopped
+        sleep 2
+    else
+        log_warn "Service $service_name is not running"
+    fi
+    
     # Determine architecture
     local arch=$(uname -m)
     if [[ "$arch" == "x86_64" ]]; then
@@ -1250,12 +1265,14 @@ upgrade_mongodb() {
     local CONFIG_DIR="/etc"
     local AUTO_DETECT=false
     local MONGOD_PATH=""
+    local SERVICE_NAME=""
     
     while [[ "$#" -gt 0 ]]; do
         case $1 in
             --mongodb-version) NEW_VERSION="$2"; shift ;;
             --config-dir) CONFIG_DIR="$2"; shift ;;
             --mongod-path) MONGOD_PATH="$2"; shift ;;
+            --service-name) SERVICE_NAME="$2"; shift ;;
             --multi-instance) MULTI_INSTANCE=true ;;
             --instance-name) INSTANCE_NAME="$2"; shift ;;
             --auto) AUTO_DETECT=true ;;
@@ -1379,10 +1396,17 @@ upgrade_mongodb() {
     
     # Determine config file path and service name
     local config_file="${CONFIG_DIR}/mongod.conf"
-    local service_name="mongod"
-    if [[ "$MULTI_INSTANCE" == "true" && -n "$INSTANCE_NAME" ]]; then
+    local service_name=""
+    
+    # Use user-specified service name if provided, otherwise determine from instance settings
+    if [[ -n "$SERVICE_NAME" ]]; then
+        service_name="$SERVICE_NAME"
+        log_info "Using specified service name: $service_name"
+    elif [[ "$MULTI_INSTANCE" == "true" && -n "$INSTANCE_NAME" ]]; then
         config_file="${CONFIG_DIR}/mongod-${INSTANCE_NAME}.conf"
         service_name="mongod-${INSTANCE_NAME}"
+    else
+        service_name="mongod"
     fi
     
     # Check if config file exists
