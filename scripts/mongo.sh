@@ -1065,6 +1065,152 @@ config_auth() {
     echo "Authentication configuration completed, node role: $ROLE. Exporter running on port $PROMETHEUS_EXPORTER_PORT."
 }
 
+upgrade_mongodb_binary() {
+    local mongod_path="$1"
+    local target_version="$2"
+    local service_name="$3"
+    
+    log_info "Starting binary MongoDB upgrade process..."
+    
+    # Determine architecture
+    local arch=$(uname -m)
+    if [[ "$arch" == "x86_64" ]]; then
+        arch="x86_64"
+    elif [[ "$arch" == "aarch64" || "$arch" == "arm64" ]]; then
+        arch="aarch64"
+    else
+        log_error "Unsupported architecture: $arch"
+        exit 1
+    fi
+    
+    # Determine OS for download URL
+    local os_type=""
+    if [[ "$OS" == "debian" ]]; then
+        # Detect Ubuntu/Debian version
+        if grep -q "Ubuntu" /etc/os-release 2>/dev/null; then
+            local ubuntu_version=$(grep VERSION_ID /etc/os-release | cut -d'"' -f2)
+            os_type="ubuntu${ubuntu_version//./}"
+        else
+            os_type="debian11"  # Default to debian11
+        fi
+    else
+        # For RHEL/CentOS
+        local rhel_version=$(grep -oE '[0-9]+' /etc/redhat-release | head -1)
+        os_type="rhel${rhel_version}0"
+    fi
+    
+    # Construct download URL
+    local download_url="https://fastdl.mongodb.org/linux/mongodb-linux-${arch}-${os_type}-${target_version}.tgz"
+    local temp_dir="/tmp/mongodb_upgrade_$$"
+    
+    log_info "Download URL: $download_url"
+    log_info "Creating temporary directory: $temp_dir"
+    mkdir -p "$temp_dir"
+    
+    # Download MongoDB binary
+    log_info "Downloading MongoDB ${target_version}..."
+    if ! wget -q "$download_url" -O "$temp_dir/mongodb.tgz"; then
+        log_error "Failed to download MongoDB from $download_url"
+        log_info "Please check if the version and OS combination is correct"
+        rm -rf "$temp_dir"
+        
+        # Restart service before exit
+        if ! systemctl is-active "$service_name" >/dev/null 2>&1; then
+            log_info "Restarting original service..."
+            systemctl start "$service_name"
+        fi
+        exit 1
+    fi
+    
+    log_success "Download completed"
+    
+    # Extract archive
+    log_info "Extracting archive..."
+    cd "$temp_dir"
+    tar -xzf mongodb.tgz
+    
+    # Find the extracted directory
+    local extracted_dir=$(find . -maxdepth 1 -type d -name "mongodb-*" | head -1)
+    if [[ -z "$extracted_dir" ]]; then
+        log_error "Failed to find extracted MongoDB directory"
+        rm -rf "$temp_dir"
+        exit 1
+    fi
+    
+    log_success "Extraction completed"
+    
+    # Get binary directory
+    local mongod_dir=$(dirname "$mongod_path")
+    
+    # Backup existing binaries
+    local backup_dir="${mongod_dir}_backup_$(date +%Y%m%d_%H%M%S)"
+    log_info "Backing up existing binaries to: $backup_dir"
+    mkdir -p "$backup_dir"
+    
+    for binary in mongod mongos mongo mongosh; do
+        if [[ -f "${mongod_dir}/${binary}" ]]; then
+            cp "${mongod_dir}/${binary}" "$backup_dir/"
+            log_info "  Backed up: $binary"
+        fi
+    done
+    
+    log_success "Backup completed"
+    
+    # Replace binaries
+    log_info "Replacing MongoDB binaries..."
+    for binary in "$extracted_dir/bin"/*; do
+        local binary_name=$(basename "$binary")
+        cp "$binary" "${mongod_dir}/"
+        chmod +x "${mongod_dir}/${binary_name}"
+        log_info "  Replaced: $binary_name"
+    done
+    
+    log_success "Binary replacement completed"
+    
+    # Clean up
+    cd /
+    rm -rf "$temp_dir"
+    log_info "Cleaned up temporary files"
+    
+    # Restart service
+    log_info "Starting MongoDB service: $service_name..."
+    systemctl start "$service_name"
+    
+    # Wait for service to start
+    sleep 3
+    
+    # Check service status
+    if systemctl is-active "$service_name" >/dev/null 2>&1; then
+        log_success "Service started successfully"
+    else
+        log_error "Service failed to start, please check logs: journalctl -u $service_name"
+        log_warn "Backup binaries are available at: $backup_dir"
+        exit 1
+    fi
+    
+    # Verify upgraded version
+    local upgraded_version=$(mongod --version | head -1 | grep -oP 'v\K[0-9.]+')
+    
+    echo ""
+    log_success "MongoDB binary upgrade completed"
+    log_info "  Target version: $target_version"
+    log_info "  Current version: ${upgraded_version:-unknown}"
+    log_info "  Backup location: $backup_dir"
+    
+    if [[ "$upgraded_version" == "$target_version" ]]; then
+        log_success "  Verification: Version matched"
+    else
+        log_warn "  Verification: Version mismatch (expected: $target_version, actual: $upgraded_version)"
+    fi
+    
+    echo ""
+    log_info "Recommendations:"
+    log_info "  1. Check service status: systemctl status $service_name"
+    log_info "  2. View logs: journalctl -u $service_name -n 50"
+    log_info "  3. Connect to database to verify functionality"
+    log_info "  4. If everything works, you can remove backup: rm -rf $backup_dir"
+}
+
 upgrade_mongodb() {
     local NEW_VERSION=""
     local INSTANCE_NAME=""
@@ -1186,42 +1332,40 @@ upgrade_mongodb() {
     # Check if MongoDB was installed via package manager
     log_info "Checking MongoDB installation method..."
     local installed_via_package=false
+    local install_method="unknown"
     
     if [[ "$OS" == "debian" ]]; then
         if dpkg -l | grep -q "^ii.*mongodb-org"; then
             installed_via_package=true
+            install_method="apt"
             log_success "Detected MongoDB installed via apt package manager"
         fi
     else
         if rpm -qa | grep -q "mongodb-org"; then
             installed_via_package=true
+            install_method="yum"
             log_success "Detected MongoDB installed via yum/dnf package manager"
         fi
     fi
     
+    # If not installed via package manager, assume binary installation
     if [[ "$installed_via_package" == "false" ]]; then
-        echo ""
-        log_error "MongoDB does not appear to be installed via package manager"
-        echo ""
-        log_info "This upgrade script only supports MongoDB installed via:"
-        log_info "  - Debian/Ubuntu: apt (mongodb-org packages)"
-        log_info "  - CentOS/RHEL: yum/dnf (mongodb-org packages)"
-        echo ""
-        log_info "If MongoDB was installed via:"
-        log_info "  - Binary tarball: Please upgrade manually by downloading new binaries"
-        log_info "  - Source compilation: Please recompile with the new version"
-        log_info "  - Other methods: Please refer to MongoDB documentation"
-        echo ""
-        log_info "Current mongod location: $(which mongod)"
-        echo ""
-        # Restart the service before exiting
-        if systemctl is-active "$service_name" >/dev/null 2>&1; then
-            log_info "Service is already running"
-        else
-            log_info "Restarting original service..."
-            systemctl start "$service_name"
+        install_method="binary"
+        log_warn "MongoDB does not appear to be installed via package manager"
+        log_info "Assuming binary installation, will attempt binary upgrade"
+        
+        # Get mongod binary location
+        local mongod_path=$(which mongod)
+        if [[ -z "$mongod_path" ]]; then
+            log_error "Cannot find mongod binary"
+            exit 1
         fi
-        exit 1
+        
+        log_info "Current mongod location: $mongod_path"
+        
+        # Perform binary upgrade
+        upgrade_mongodb_binary "$mongod_path" "$NEW_VERSION" "$service_name"
+        return $?
     fi
     
     # Upgrade MongoDB based on OS
