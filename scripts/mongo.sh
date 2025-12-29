@@ -89,6 +89,7 @@ init-replica and config-auth options:
 upgrade-mongo options:
   --mongodb-version <version>         Target MongoDB version (e.g., 5.0.12)
   --auto                              Auto-detect and upgrade to latest available version
+  --mongod-path <path>                Path to mongod binary (for binary installations)
   --config-dir <path>                 Config directory path (default: /etc)
   --multi-instance                    Upgrade multi-instance deployment
   --instance-name <name>              Instance name for multi-instance mode
@@ -119,6 +120,9 @@ Examples:
 
   # Auto-detect and upgrade to latest available version
   $0 upgrade-mongo --auto
+
+  # Upgrade binary installation with custom mongod path
+  $0 upgrade-mongo --mongodb-version 5.0.12 --mongod-path /usr/local/mongodb/bin/mongod
 
   # Upgrade MongoDB with custom config directory
   $0 upgrade-mongo --mongodb-version 5.0.12 --config-dir /data/mongodb/config
@@ -1216,11 +1220,13 @@ upgrade_mongodb() {
     local INSTANCE_NAME=""
     local CONFIG_DIR="/etc"
     local AUTO_DETECT=false
+    local MONGOD_PATH=""
     
     while [[ "$#" -gt 0 ]]; do
         case $1 in
             --mongodb-version) NEW_VERSION="$2"; shift ;;
             --config-dir) CONFIG_DIR="$2"; shift ;;
+            --mongod-path) MONGOD_PATH="$2"; shift ;;
             --multi-instance) MULTI_INSTANCE=true ;;
             --instance-name) INSTANCE_NAME="$2"; shift ;;
             --auto) AUTO_DETECT=true ;;
@@ -1232,17 +1238,53 @@ upgrade_mongodb() {
     # Detect OS
     check_os
     
-    # Get current version
+    # Get current version - try custom path first, then PATH
     local current_version=""
     local current_major_version=""
-    if command -v mongod >/dev/null 2>&1; then
-        current_version=$(mongod --version | head -1 | grep -oP 'v\K[0-9.]+')
-        current_major_version="${current_version%.*}"  # Extract major version like 5.0
-        log_info "Current MongoDB version: ${current_version:-unknown}"
+    local mongod_binary=""
+    
+    if [[ -n "$MONGOD_PATH" ]]; then
+        # User specified mongod path
+        if [[ -f "$MONGOD_PATH" && -x "$MONGOD_PATH" ]]; then
+            mongod_binary="$MONGOD_PATH"
+            log_info "Using specified mongod: $MONGOD_PATH"
+        else
+            log_error "Specified mongod path does not exist or is not executable: $MONGOD_PATH"
+            exit 1
+        fi
+    elif command -v mongod >/dev/null 2>&1; then
+        # mongod found in PATH
+        mongod_binary=$(which mongod)
+        log_info "Found mongod in PATH: $mongod_binary"
     else
-        log_error "mongod not found, please install MongoDB first"
-        exit 1
+        # Try common binary installation locations
+        local common_paths=(
+            "/usr/local/mongodb/bin/mongod"
+            "/usr/local/bin/mongod"
+            "/opt/mongodb/bin/mongod"
+            "/data/mongodb/bin/mongod"
+        )
+        
+        for path in "${common_paths[@]}"; do
+            if [[ -f "$path" && -x "$path" ]]; then
+                mongod_binary="$path"
+                log_info "Found mongod at: $path"
+                break
+            fi
+        done
+        
+        if [[ -z "$mongod_binary" ]]; then
+            log_error "Cannot find mongod binary"
+            log_info "Please specify mongod location with --mongod-path parameter"
+            log_info "Example: $0 upgrade-mongo --mongodb-version 5.0.12 --mongod-path /usr/local/mongodb/bin/mongod"
+            exit 1
+        fi
     fi
+    
+    # Get version from the found mongod binary
+    current_version=$("$mongod_binary" --version | head -1 | grep -oP 'v\K[0-9.]+')
+    current_major_version="${current_version%.*}"  # Extract major version like 5.0
+    log_info "Current MongoDB version: ${current_version:-unknown}"
     
     # Auto-detect latest available version if --auto flag is used or no version specified
     if [[ -z "$NEW_VERSION" ]] || [[ "$AUTO_DETECT" == "true" ]]; then
@@ -1353,18 +1395,10 @@ upgrade_mongodb() {
         install_method="binary"
         log_warn "MongoDB does not appear to be installed via package manager"
         log_info "Assuming binary installation, will attempt binary upgrade"
-        
-        # Get mongod binary location
-        local mongod_path=$(which mongod)
-        if [[ -z "$mongod_path" ]]; then
-            log_error "Cannot find mongod binary"
-            exit 1
-        fi
-        
-        log_info "Current mongod location: $mongod_path"
+        log_info "Current mongod location: $mongod_binary"
         
         # Perform binary upgrade
-        upgrade_mongodb_binary "$mongod_path" "$NEW_VERSION" "$service_name"
+        upgrade_mongodb_binary "$mongod_binary" "$NEW_VERSION" "$service_name"
         return $?
     fi
     
