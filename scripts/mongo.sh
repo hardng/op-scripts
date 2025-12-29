@@ -1191,35 +1191,6 @@ upgrade_mongodb_binary() {
     rm -rf "$temp_dir"
     log_info "Cleaned up temporary files"
     
-    # Update systemd service file if it exists and has hardcoded path
-    local service_file="/etc/systemd/system/${service_name}.service"
-    if [[ -f "$service_file" ]]; then
-        log_info "Checking systemd service file: $service_file"
-        
-        # Check if ExecStart contains a hardcoded mongod path
-        if grep -q "ExecStart.*mongod" "$service_file"; then
-            log_info "Updating mongod path in systemd service file..."
-            
-            # Backup service file
-            cp "$service_file" "${service_file}.backup.$(date +%Y%m%d_%H%M%S)"
-            
-            # Update ExecStart to use the correct mongod path
-            # This handles various formats like:
-            # ExecStart=/usr/bin/mongod --config /etc/mongod.conf
-            # ExecStart=/usr/local/mongodb/bin/mongod --config ...
-            sed -i "s|ExecStart=.*mongod|ExecStart=${mongod_dir}/mongod|" "$service_file"
-            
-            log_success "Updated systemd service file"
-            systemctl daemon-reload
-            log_info "Reloaded systemd daemon"
-        else
-            log_info "Service file does not contain mongod path, skipping update"
-        fi
-    else
-        log_warn "Systemd service file not found: $service_file"
-        log_warn "You may need to manually update your service configuration"
-    fi
-    
     # Restart service
     log_info "Starting MongoDB service: $service_name..."
     systemctl start "$service_name"
