@@ -215,7 +215,7 @@ setup_mcli_alias() {
         
         # 阿里云接入点检测：只要域名包含 accesspoint 就强制 alias = bucket
         # 这是为了解决用户反馈的多余 myminio 前缀以及 DNS 解析子域名的报错
-        if [[ "$S3_ENDPOINT" == *"accesspoint"* ]]; then
+        if [[ "$S3_ENDPOINT" == *"accesspoint.aliyuncs.com"* ]]; then
             log "Aliyun Access Point detected. Synchronizing S3_ALIAS with S3_BUCKET ($S3_BUCKET) to avoid prefix and DNS issues."
             S3_ALIAS="$S3_BUCKET"
         fi
