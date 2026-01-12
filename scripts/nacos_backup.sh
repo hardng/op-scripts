@@ -107,11 +107,12 @@ do_backup() {
     
     # Execute dump and compress
     log "Executing dump..."
+    local dump_flags="--single-transaction --no-tablespaces --column-statistics=0"
     if [[ "$mysqldump_cmd" == *"docker"* ]]; then
         # If using docker, we pipe the output
-        eval "$mysqldump_cmd -h\"$DB_HOST\" -P\"$DB_PORT\" -u\"$DB_USER\" -p\"$DB_PASSWORD\" --single-transaction \"$DB_NAME\"" | gzip > "$filepath"
+        eval "$mysqldump_cmd -h\"$DB_HOST\" -P\"$DB_PORT\" -u\"$DB_USER\" -p\"$DB_PASSWORD\" $dump_flags \"$DB_NAME\"" | gzip > "$filepath"
     else
-        $mysqldump_cmd -h"$DB_HOST" -P"$DB_PORT" -u"$DB_USER" -p"$DB_PASSWORD" --single-transaction "$DB_NAME" | gzip > "$filepath"
+        $mysqldump_cmd -h"$DB_HOST" -P"$DB_PORT" -u"$DB_USER" -p"$DB_PASSWORD" $dump_flags "$DB_NAME" | gzip > "$filepath"
     fi
 
     if [ -s "$filepath" ]; then
