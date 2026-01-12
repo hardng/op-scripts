@@ -214,7 +214,12 @@ setup_mcli_alias() {
         fi
         log "Configuring mcli alias: $S3_ALIAS (Endpoint: $S3_ENDPOINT)"
         # Rollback: Use --path on as requested to resolve DNS issues.
-        eval "$mcli_cmd alias set \"$S3_ALIAS\" \"$S3_ENDPOINT\" \"$S3_ACCESS_KEY\" \"$S3_SECRET_KEY\" --api s3v4 --path on" >/dev/null
+        # Remove >/dev/null to see errors if it fails
+        if [[ "$mcli_cmd" == *"docker"* ]]; then
+            eval "$mcli_cmd alias set \"$S3_ALIAS\" \"$S3_ENDPOINT\" \"$S3_ACCESS_KEY\" \"$S3_SECRET_KEY\" --api s3v4 --path on"
+        else
+            $mcli_cmd alias set "$S3_ALIAS" "$S3_ENDPOINT" "$S3_ACCESS_KEY" "$S3_SECRET_KEY" --api s3v4 --path on
+        fi
     fi
 }
 
@@ -223,8 +228,6 @@ upload_to_s3() {
     local name=$2
     
     local mcli_cmd
-    # When using docker for mc, we need to mount the backup directory to access the file
-    # Inside the container, the command is always 'mc'
     mcli_cmd=$(get_command "$MC_CMD" "minio/mc:latest" "-v \"$BACKUP_DIR:$BACKUP_DIR\" -v \"$HOME/.mc:/root/.mc\"" "mc") || {
         error "MinIO Client ($MC_CMD) not found and Docker is not available. Skipping S3 upload."
         return 1
@@ -236,9 +239,21 @@ upload_to_s3() {
     local clean_path="${S3_PATH#/}" # Remove leading slash
     [[ -n "$clean_path" && "$clean_path" != */ ]] && clean_path="${clean_path}/" # Ensure trailing slash
     
-    local target="${S3_ALIAS}/${S3_BUCKET}/${clean_path}${name}"
+    # Smart handle for Aliyun OSS Access Point: if endpoint contains AP domain, the alias represents the bucket
+    local target
+    if [[ "$S3_ENDPOINT" == *".accesspoint.aliyuncs.com"* ]]; then
+        # Use ALIAS/PATH (S3_BUCKET is implicit in AP)
+        target="${S3_ALIAS}/${clean_path}${name}"
+    else
+        target="${S3_ALIAS}/${S3_BUCKET}/${clean_path}${name}"
+    fi
+
     log "Uploading to S3 (mcli): $target"
-    eval "$mcli_cmd cp \"$file\" \"$target\""
+    if [[ "$mcli_cmd" == *"docker"* ]]; then
+        eval "$mcli_cmd cp \"$file\" \"$target\""
+    else
+        $mcli_cmd cp "$file" "$target"
+    fi
 }
 
 cleanup_s3() {
@@ -251,8 +266,19 @@ cleanup_s3() {
     local clean_path="${S3_PATH#/}"
     [[ -n "$clean_path" && "$clean_path" != */ ]] && clean_path="${clean_path}/"
 
+    local target
+    if [[ "$S3_ENDPOINT" == *".accesspoint.aliyuncs.com"* ]]; then
+        target="${S3_ALIAS}/${clean_path}"
+    else
+        target="${S3_ALIAS}/${S3_BUCKET}/${clean_path}"
+    fi
+
     # Use mc find --older-than to delete old files
-    eval "$mcli_cmd rm --recursive --older-than \"${S3_RETENTION_DAYS}d\" \"${S3_ALIAS}/${S3_BUCKET}/${clean_path}\""
+    if [[ "$mcli_cmd" == *"docker"* ]]; then
+        eval "$mcli_cmd rm --recursive --older-than \"${S3_RETENTION_DAYS}d\" \"$target\""
+    else
+        $mcli_cmd rm --recursive --older-than "${S3_RETENTION_DAYS}d" "$target"
+    fi
 }
 
 cleanup_local() {
