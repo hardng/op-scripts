@@ -213,19 +213,11 @@ setup_mcli_alias() {
             S3_ENDPOINT="http://${S3_ENDPOINT}"
         fi
         
-        # 阿里云接入点检测：只要域名包含 accesspoint 就强制 alias = bucket
-        # 这是为了解决用户反馈的多余 myminio 前缀以及 DNS 解析子域名的报错
-        if [[ "$S3_ENDPOINT" == *"accesspoint.aliyuncs.com"* ]]; then
-            log "Aliyun Access Point detected. Synchronizing S3_ALIAS with S3_BUCKET ($S3_BUCKET) to avoid prefix and DNS issues."
-            S3_ALIAS="$S3_BUCKET"
-        fi
-
         log "Configuring mcli alias: $S3_ALIAS (Endpoint: $S3_ENDPOINT)"
-        # Use s3v4 with --path on to resolve DNS issues on Aliyun Access Points
         if [[ "$mcli_cmd" == *"docker"* ]]; then
-            eval "$mcli_cmd alias set \"$S3_ALIAS\" \"$S3_ENDPOINT\" \"$S3_ACCESS_KEY\" \"$S3_SECRET_KEY\" --api s3v4 --path on" >/dev/null
+            eval "$mcli_cmd alias set \"$S3_ALIAS\" \"$S3_ENDPOINT\" \"$S3_ACCESS_KEY\" \"$S3_SECRET_KEY\" --api s3v4" >/dev/null
         else
-            $mcli_cmd alias set "$S3_ALIAS" "$S3_ENDPOINT" "$S3_ACCESS_KEY" "$S3_SECRET_KEY" --api s3v4 --path on >/dev/null
+            $mcli_cmd alias set "$S3_ALIAS" "$S3_ENDPOINT" "$S3_ACCESS_KEY" "$S3_SECRET_KEY" --api s3v4 >/dev/null
         fi
     fi
 }
@@ -247,12 +239,7 @@ upload_to_s3() {
     [[ -n "$clean_path" && "$clean_path" != */ ]] && clean_path="${clean_path}/" # Ensure trailing slash
     
     local target
-    if [[ "$S3_ENDPOINT" == *"accesspoint.aliyuncs.com"* ]]; then
-        # 接入点模式：目标路径就是 ALIAS/KEY (ALIAS 已被设为 BUCKET)
-        target="${S3_ALIAS}/${clean_path}${name}"
-    else
-        target="${S3_ALIAS}/${S3_BUCKET}/${clean_path}${name}"
-    fi
+    target="${S3_ALIAS}/${S3_BUCKET}/${clean_path}${name}"
 
     log "Uploading to S3 (mcli): $target"
     if [[ "$mcli_cmd" == *"docker"* ]]; then
@@ -273,11 +260,7 @@ cleanup_s3() {
     [[ -n "$clean_path" && "$clean_path" != */ ]] && clean_path="${clean_path}/"
 
     local target
-    if [[ "$S3_ENDPOINT" == *"accesspoint.aliyuncs.com"* ]]; then
-        target="${S3_ALIAS}/${clean_path}"
-    else
-        target="${S3_ALIAS}/${S3_BUCKET}/${clean_path}"
-    fi
+    target="${S3_ALIAS}/${S3_BUCKET}/${clean_path}"
 
     # Use mc find --older-than to delete old files
     if [[ "$mcli_cmd" == *"docker"* ]]; then
