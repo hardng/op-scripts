@@ -26,6 +26,9 @@ S3_BUCKET="my-nacos-backups"
 S3_PATH="nacos-db/"
 S3_RETENTION_DAYS=30
 MC_CMD="mcli"
+S3_ENDPOINT=""
+S3_ACCESS_KEY=""
+S3_SECRET_KEY=""
 
 # Logger
 log() {
@@ -62,12 +65,14 @@ S3 Configuration:
   --s3-bucket <bucket>          S3 bucket name.
   --s3-path <path>              S3 path prefix (Default: $S3_PATH)
   --s3-retention <days>         S3 retention days (Default: $S3_RETENTION_DAYS)
+  --s3-url <url>                S3 Endpoint URL (e.g., http://minio:9000).
+  --s3-ak <access_key>          S3 Access Key.
+  --s3-sk <secret_key>          S3 Secret Key.
   --mc-cmd <cmd>                MinIO Client command name (Default: $MC_CMD)
 
 Examples:
-  $0 --backup --db-host 1.2.3.4 --db-pass "my-secret"
-  $0 --backup --s3 --s3-bucket my-backups
-  $0 --restore mc/myminio/my-nacos-backups/nacos-db/nacos_db_20260109_1540.sql.gz
+  $0 --backup --s3 --s3-url http://localhost:9000 --s3-ak admin --s3-sk password --s3-bucket my-backups
+  $0 --restore mcli/myminio/my-nacos-backups/nacos-db/nacos_db_20260109_1540.sql.gz
 EOF
     exit 0
 }
@@ -176,23 +181,33 @@ do_restore() {
 }
 
 # --- S3 Operations ---
+# Helper to ensure mcli alias is configured
+setup_mcli_alias() {
+    if [ -n "$S3_ENDPOINT" ] && [ -n "$S3_ACCESS_KEY" ] && [ -n "$S3_SECRET_KEY" ]; then
+        log "Configuring mcli alias: $S3_ALIAS"
+        $MC_CMD alias set "$S3_ALIAS" "$S3_ENDPOINT" "$S3_ACCESS_KEY" "$S3_SECRET_KEY" >/dev/null
+    fi
+}
+
 upload_to_s3() {
     local file=$1
     local name=$2
-    local target="${S3_ALIAS}/${S3_BUCKET}/${S3_PATH}${name}"
-    log "Uploading to S3 (mc): $target"
     
     if ! command -v "$MC_CMD" >/dev/null 2>&1; then
         error "MinIO Client ($MC_CMD) not found. Skipping S3 upload."
         return 1
     fi
 
+    setup_mcli_alias
+
+    local target="${S3_ALIAS}/${S3_BUCKET}/${S3_PATH}${name}"
+    log "Uploading to S3 (mcli): $target"
     $MC_CMD cp "$file" "$target"
 }
 
 cleanup_s3() {
     log "Cleaning up old backups from S3 (Retention: ${S3_RETENTION_DAYS} days)..."
-    
+    setup_mcli_alias
     # Use mc find --older-than to delete old files
     $MC_CMD rm --recursive --older-than "${S3_RETENTION_DAYS}d" "${S3_ALIAS}/${S3_BUCKET}/${S3_PATH}"
 }
@@ -263,6 +278,18 @@ while [[ $# -gt 0 ]]; do
             ;;
         --s3-path)
             S3_PATH="$2"
+            shift 2
+            ;;
+        --s3-url)
+            S3_ENDPOINT="$2"
+            shift 2
+            ;;
+        --s3-ak)
+            S3_ACCESS_KEY="$2"
+            shift 2
+            ;;
+        --s3-sk)
+            S3_SECRET_KEY="$2"
             shift 2
             ;;
         --mc-cmd)
