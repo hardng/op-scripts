@@ -212,7 +212,8 @@ setup_mcli_alias() {
             S3_ENDPOINT="http://${S3_ENDPOINT}"
         fi
         log "Configuring mcli alias: $S3_ALIAS (Endpoint: $S3_ENDPOINT)"
-        $mcli_cmd alias set "$S3_ALIAS" "$S3_ENDPOINT" "$S3_ACCESS_KEY" "$S3_SECRET_KEY" --api s3v4 >/dev/null
+        # Use s3v2 to force path-style and avoid DNS probe issues on Aliyun OSS Access Points
+        $mcli_cmd alias set "$S3_ALIAS" "$S3_ENDPOINT" "$S3_ACCESS_KEY" "$S3_SECRET_KEY" --api s3v2 >/dev/null
     fi
 }
 
@@ -229,7 +230,11 @@ upload_to_s3() {
 
     setup_mcli_alias "$mcli_cmd"
 
-    local target="${S3_ALIAS}/${S3_BUCKET}/${S3_PATH}${name}"
+    # Robust path handling
+    local clean_path="${S3_PATH#/}" # Remove leading slash
+    [[ -n "$clean_path" && "$clean_path" != */ ]] && clean_path="${clean_path}/" # Ensure trailing slash
+    
+    local target="${S3_ALIAS}/${S3_BUCKET}/${clean_path}${name}"
     log "Uploading to S3 (mcli): $target"
     $mcli_cmd cp "$file" "$target"
 }
@@ -240,8 +245,12 @@ cleanup_s3() {
     mcli_cmd=$(get_command "$MC_CMD" "minio/mc:latest" "-v \"$HOME/.mc:/root/.mc\"") || return 1
     
     setup_mcli_alias "$mcli_cmd"
+    
+    local clean_path="${S3_PATH#/}"
+    [[ -n "$clean_path" && "$clean_path" != */ ]] && clean_path="${clean_path}/"
+
     # Use mc find --older-than to delete old files
-    $mcli_cmd rm --recursive --older-than "${S3_RETENTION_DAYS}d" "${S3_ALIAS}/${S3_BUCKET}/${S3_PATH}"
+    $mcli_cmd rm --recursive --older-than "${S3_RETENTION_DAYS}d" "${S3_ALIAS}/${S3_BUCKET}/${clean_path}"
 }
 
 cleanup_local() {
