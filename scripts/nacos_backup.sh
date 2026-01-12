@@ -247,7 +247,7 @@ upload_to_s3() {
     [[ -n "$clean_path" && "$clean_path" != */ ]] && clean_path="${clean_path}/" # Ensure trailing slash
     
     local target
-    if [[ "$S3_ENDPOINT" == *"accesspoint"* ]]; then
+    if [[ "$S3_ENDPOINT" == *"accesspoint.aliyuncs.com"* ]]; then
         # 接入点模式：目标路径就是 ALIAS/KEY (ALIAS 已被设为 BUCKET)
         target="${S3_ALIAS}/${clean_path}${name}"
     else
@@ -273,7 +273,7 @@ cleanup_s3() {
     [[ -n "$clean_path" && "$clean_path" != */ ]] && clean_path="${clean_path}/"
 
     local target
-    if [[ "$S3_ENDPOINT" == *"accesspoint"* ]]; then
+    if [[ "$S3_ENDPOINT" == *"accesspoint.aliyuncs.com"* ]]; then
         target="${S3_ALIAS}/${clean_path}"
     else
         target="${S3_ALIAS}/${S3_BUCKET}/${clean_path}"
