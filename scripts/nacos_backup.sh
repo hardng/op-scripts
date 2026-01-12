@@ -107,7 +107,13 @@ do_backup() {
     
     # Execute dump and compress
     log "Executing dump..."
-    local dump_flags="--single-transaction --no-tablespaces --column-statistics=0"
+    # Flags explained:
+    # --single-transaction: consistent backup for InnoDB without locking
+    # --no-tablespaces: avoids privilege error for tablespace info
+    # --column-statistics=0: avoids 8.0+ client error for statistics
+    # --set-gtid-purged=OFF: avoids RELOAD privilege error on RDS/Managed DBs
+    # --skip-lock-tables: ensures no locking is attempted
+    local dump_flags="--single-transaction --no-tablespaces --column-statistics=0 --set-gtid-purged=OFF --skip-lock-tables"
     if [[ "$mysqldump_cmd" == *"docker"* ]]; then
         # If using docker, we pipe the output
         eval "$mysqldump_cmd -h\"$DB_HOST\" -P\"$DB_PORT\" -u\"$DB_USER\" -p\"$DB_PASSWORD\" $dump_flags \"$DB_NAME\"" | gzip > "$filepath"
