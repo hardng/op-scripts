@@ -52,7 +52,7 @@ Database Configuration:
   --db-host <host>              Database host (Default: $DB_HOST)
   --db-port <port>              Database port (Default: $DB_PORT)
   --db-user <user>              Database user (Default: $DB_USER)
-  --db-pass <pass>              Database password (Default: ******)
+  --db-pwd <pwd>                Database password (Default: ******)
   --db-name <name>              Database name (Default: $DB_NAME)
 
 Backup & Retention:
@@ -89,7 +89,10 @@ get_command() {
             error "Neither '$cmd' nor 'docker' found. Please install one of them."
             exit 1
         fi
-        echo "docker run --rm -i mysql:latest $cmd"
+            echo "docker run --rm -i mysql:latest $cmd"
+        else
+            return 1
+        fi
     fi
 }
 
@@ -105,9 +108,10 @@ do_backup() {
     local mysqldump_cmd=$(get_command "mysqldump")
     
     # Execute dump and compress
+    log "Executing dump..."
     if [[ "$mysqldump_cmd" == *"docker"* ]]; then
         # If using docker, we pipe the output
-        $mysqldump_cmd -h"$DB_HOST" -P"$DB_PORT" -u"$DB_USER" -p"$DB_PASSWORD" --single-transaction "$DB_NAME" | gzip > "$filepath"
+        eval "$mysqldump_cmd -h\"$DB_HOST\" -P\"$DB_PORT\" -u\"$DB_USER\" -p\"$DB_PASSWORD\" --single-transaction \"$DB_NAME\"" | gzip > "$filepath"
     else
         $mysqldump_cmd -h"$DB_HOST" -P"$DB_PORT" -u"$DB_USER" -p"$DB_PASSWORD" --single-transaction "$DB_NAME" | gzip > "$filepath"
     fi
@@ -170,7 +174,11 @@ do_restore() {
     local mysql_cmd=$(get_command "mysql")
     
     # Decompress and import
-    gunzip < "$restore_file" | $mysql_cmd -h"$DB_HOST" -P"$DB_PORT" -u"$DB_USER" -p"$DB_PASSWORD" "$DB_NAME"
+    if [[ "$mysql_cmd" == *"docker"* ]]; then
+        gunzip < "$restore_file" | eval "$mysql_cmd -h\"$DB_HOST\" -P\"$DB_PORT\" -u\"$DB_USER\" -p\"$DB_PASSWORD\" \"$DB_NAME\""
+    else
+        gunzip < "$restore_file" | $mysql_cmd -h"$DB_HOST" -P"$DB_PORT" -u"$DB_USER" -p"$DB_PASSWORD" "$DB_NAME"
+    fi
 
     log "Restore completed successfully."
     
@@ -248,7 +256,7 @@ while [[ $# -gt 0 ]]; do
             DB_USER="$2"
             shift 2
             ;;
-        --db-pass)
+        --db-pwd)
             DB_PASSWORD="$2"
             shift 2
             ;;
