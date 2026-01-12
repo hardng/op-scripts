@@ -213,9 +213,10 @@ setup_mcli_alias() {
             S3_ENDPOINT="http://${S3_ENDPOINT}"
         fi
         
-        # 对于阿里云接入点，直接用 Bucket 名作为 mc alias 名字。
-        # 这样路径就是 bucket/key，符合直觉，也避开了 DNS 解析子域名的坑。
-        if [[ "$S3_ENDPOINT" == *".accesspoint.aliyuncs.com"* ]]; then
+        # 阿里云接入点检测：只要域名包含 accesspoint 就强制 alias = bucket
+        # 这是为了解决用户反馈的多余 myminio 前缀以及 DNS 解析子域名的报错
+        if [[ "$S3_ENDPOINT" == *"accesspoint"* ]]; then
+            log "Aliyun Access Point detected. Synchronizing S3_ALIAS with S3_BUCKET ($S3_BUCKET) to avoid prefix and DNS issues."
             S3_ALIAS="$S3_BUCKET"
         fi
 
@@ -246,8 +247,8 @@ upload_to_s3() {
     [[ -n "$clean_path" && "$clean_path" != */ ]] && clean_path="${clean_path}/" # Ensure trailing slash
     
     local target
-    # 如果是接入点，别名已经等于 bucket 名，所以目标就是 ALIAS/KEY
-    if [[ "$S3_ENDPOINT" == *".accesspoint.aliyuncs.com"* ]]; then
+    if [[ "$S3_ENDPOINT" == *"accesspoint"* ]]; then
+        # 接入点模式：目标路径就是 ALIAS/KEY (ALIAS 已被设为 BUCKET)
         target="${S3_ALIAS}/${clean_path}${name}"
     else
         target="${S3_ALIAS}/${S3_BUCKET}/${clean_path}${name}"
@@ -272,7 +273,7 @@ cleanup_s3() {
     [[ -n "$clean_path" && "$clean_path" != */ ]] && clean_path="${clean_path}/"
 
     local target
-    if [[ "$S3_ENDPOINT" == *".accesspoint.aliyuncs.com"* ]]; then
+    if [[ "$S3_ENDPOINT" == *"accesspoint"* ]]; then
         target="${S3_ALIAS}/${clean_path}"
     else
         target="${S3_ALIAS}/${S3_BUCKET}/${clean_path}"
