@@ -212,8 +212,8 @@ setup_mcli_alias() {
             S3_ENDPOINT="http://${S3_ENDPOINT}"
         fi
         log "Configuring mcli alias: $S3_ALIAS (Endpoint: $S3_ENDPOINT)"
-        # Use s3v4 with --path on to force path-style access for Aliyun OSS Access Points
-        $mcli_cmd alias set "$S3_ALIAS" "$S3_ENDPOINT" "$S3_ACCESS_KEY" "$S3_SECRET_KEY" --api s3v4 --path on >/dev/null 2>&1 || \
+        # Aliyun OSS (including Access Points) requires Virtual-Hosted Style and S3v4.
+        # DO NOT use --path on, as it causes 'InvalidAccessPointNetworkType' or Access Denied.
         $mcli_cmd alias set "$S3_ALIAS" "$S3_ENDPOINT" "$S3_ACCESS_KEY" "$S3_SECRET_KEY" --api s3v4 >/dev/null
     fi
 }
