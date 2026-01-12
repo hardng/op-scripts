@@ -19,12 +19,15 @@ DB_NAME="nacos_devtest"
 
 BACKUP_DIR="/opt/nacos-backups"
 RETENTION_DAYS=7
+KEEP_COUNT=1
 
 ENABLE_S3=false
 S3_ALIAS="myminio"
 S3_BUCKET="my-nacos-backups"
 S3_PATH="nacos-db/"
 S3_RETENTION_DAYS=30
+S3_KEEP_COUNT=1
+S3_CLEANUP_LOCAL=false
 MC_CMD="mcli"
 S3_ENDPOINT=""
 S3_ACCESS_KEY=""
@@ -58,6 +61,7 @@ Database Configuration:
 Backup & Retention:
   --dir <path>                  Local backup directory (Default: $BACKUP_DIR)
   --retention <days>            Local retention days (Default: $RETENTION_DAYS)
+  --keep-count <count>          Local retention count (Default: $KEEP_COUNT, 0 to disable)
 
 S3 Configuration:
   --s3                          Enable S3 backup (via MinIO Client).
@@ -65,6 +69,8 @@ S3 Configuration:
   --s3-bucket <bucket>          S3 bucket name.
   --s3-path <path>              S3 path prefix (Default: $S3_PATH)
   --s3-retention <days>         S3 retention days (Default: $S3_RETENTION_DAYS)
+  --s3-keep-count <count>       S3 retention count (Default: $S3_KEEP_COUNT, 0 to disable)
+  --s3-cleanup-local            Delete local backup file after successful S3 upload.
   --s3-url <url>                S3 Endpoint URL (e.g., http://minio:9000).
   --s3-ak <access_key>          S3 Access Key.
   --s3-sk <secret_key>          S3 Secret Key.
@@ -131,12 +137,21 @@ do_backup() {
         log "Backup successful: $filepath"
         
         # S3 Upload
+        local s3_success=false
         if [ "$ENABLE_S3" = true ]; then
-            upload_to_s3 "$filepath" "$filename"
-            cleanup_s3
+            if upload_to_s3 "$filepath" "$filename"; then
+                s3_success=true
+                cleanup_s3
+            fi
         fi
         
-        # Local Cleanup
+        # Clean up local file if S3 succeeded and cleanup is requested
+        if [ "$s3_success" = true ] && [ "$S3_CLEANUP_LOCAL" = true ]; then
+            log "S3 upload successful, deleting local backup: $filepath"
+            rm -f "$filepath"
+        fi
+
+        # Global Local Cleanup (Retention)
         cleanup_local
     else
         error "Backup failed or file is empty."
@@ -250,29 +265,64 @@ upload_to_s3() {
 }
 
 cleanup_s3() {
-    log "Cleaning up old backups from S3 (Retention: ${S3_RETENTION_DAYS} days)..."
     local mcli_cmd
     mcli_cmd=$(get_command "$MC_CMD" "minio/mc:latest" "-v \"$HOME/.mc:/root/.mc\"" "mc") || return 1
-    
     setup_mcli_alias "$mcli_cmd"
     
     local clean_path="${S3_PATH#/}"
     [[ -n "$clean_path" && "$clean_path" != */ ]] && clean_path="${clean_path}/"
+    local target="${S3_ALIAS}/${S3_BUCKET}/${clean_path}"
 
-    local target
-    target="${S3_ALIAS}/${S3_BUCKET}/${clean_path}"
+    # 1. Time-based retention
+    if [ "$S3_RETENTION_DAYS" -gt 0 ]; then
+        log "Cleaning up old S3 backups (Retention: ${S3_RETENTION_DAYS} days)..."
+        if [[ "$mcli_cmd" == *"docker"* ]]; then
+            eval "$mcli_cmd rm --recursive --older-than \"${S3_RETENTION_DAYS}d\" \"$target\"" >/dev/null 2>&1 || true
+        else
+            $mcli_cmd rm --recursive --older-than "${S3_RETENTION_DAYS}d" "$target" >/dev/null 2>&1 || true
+        fi
+    fi
 
-    # Use mc find --older-than to delete old files
-    if [[ "$mcli_cmd" == *"docker"* ]]; then
-        eval "$mcli_cmd rm --recursive --older-than \"${S3_RETENTION_DAYS}d\" \"$target\""
-    else
-        $mcli_cmd rm --recursive --older-than "${S3_RETENTION_DAYS}d" "$target"
+    # 2. Count-based retention
+    if [ "$S3_KEEP_COUNT" -gt 0 ]; then
+        log "Cleaning up old S3 backups (Keeping latest: ${S3_KEEP_COUNT})..."
+        local files
+        if [[ "$mcli_cmd" == *"docker"* ]]; then
+            files=$(eval "$mcli_cmd ls --json \"$target\"" | grep "nacos_db_" | sed 's/.*"key":"\([^"]*\)".*/\1/' | sort -r)
+        else
+            files=$($mcli_cmd ls --json "$target" | grep "nacos_db_" | sed 's/.*"key":"\([^"]*\)".*/\1/' | sort -r)
+        fi
+        
+        local count=0
+        while read -r line; do
+            [ -z "$line" ] && continue
+            count=$((count + 1))
+            if [ "$count" -gt "$S3_KEEP_COUNT" ]; then
+                log "Deleting excess S3 backup: $line"
+                if [[ "$mcli_cmd" == *"docker"* ]]; then
+                    eval "$mcli_cmd rm \"${target}${line}\"" >/dev/null 2>&1
+                else
+                    $mcli_cmd rm "${target}${line}" >/dev/null 2>&1
+                fi
+            fi
+        done <<< "$files"
     fi
 }
 
 cleanup_local() {
-    log "Cleaning up local backups older than ${RETENTION_DAYS} days..."
-    find "$BACKUP_DIR" -name "nacos_db_*.sql.gz" -mtime +$RETENTION_DAYS -exec rm -f {} \;
+    # 1. Time-based retention
+    if [ "$RETENTION_DAYS" -gt 0 ]; then
+        log "Cleaning up local backups older than ${RETENTION_DAYS} days..."
+        find "$BACKUP_DIR" -name "nacos_db_*.sql.gz" -mtime +$RETENTION_DAYS -exec rm -f {} \;
+    fi
+
+    # 2. Count-based retention
+    if [ "$KEEP_COUNT" -gt 0 ]; then
+        log "Cleaning up local backups (Keeping latest: ${KEEP_COUNT})..."
+        # List files by time (newest first), skip the first KEEP_COUNT, and delete the rest
+        # shellcheck disable=SC2012
+        ls -t "$BACKUP_DIR"/nacos_db_*.sql.gz 2>/dev/null | tail -n +$((KEEP_COUNT + 1)) | xargs -r rm -f
+    fi
 }
 
 # --- CLI Parsing ---
@@ -356,6 +406,18 @@ while [[ $# -gt 0 ]]; do
             ;;
         --s3-retention)
             S3_RETENTION_DAYS="$2"
+            shift 2
+            ;;
+        --s3-keep-count)
+            S3_KEEP_COUNT="$2"
+            shift 2
+            ;;
+        --s3-cleanup-local)
+            S3_CLEANUP_LOCAL=true
+            shift
+            ;;
+        --keep-count)
+            KEEP_COUNT="$2"
             shift 2
             ;;
         -h|--help)
