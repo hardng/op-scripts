@@ -212,13 +212,19 @@ setup_mcli_alias() {
             log "No scheme found in S3 URL, defaulting to http://"
             S3_ENDPOINT="http://${S3_ENDPOINT}"
         fi
+        
+        # 对于阿里云接入点，直接用 Bucket 名作为 mc alias 名字。
+        # 这样路径就是 bucket/key，符合直觉，也避开了 DNS 解析子域名的坑。
+        if [[ "$S3_ENDPOINT" == *".accesspoint.aliyuncs.com"* ]]; then
+            S3_ALIAS="$S3_BUCKET"
+        fi
+
         log "Configuring mcli alias: $S3_ALIAS (Endpoint: $S3_ENDPOINT)"
-        # Rollback: Use --path on as requested to resolve DNS issues.
-        # Remove >/dev/null to see errors if it fails
+        # Use s3v4 with --path on to resolve DNS issues on Aliyun Access Points
         if [[ "$mcli_cmd" == *"docker"* ]]; then
-            eval "$mcli_cmd alias set \"$S3_ALIAS\" \"$S3_ENDPOINT\" \"$S3_ACCESS_KEY\" \"$S3_SECRET_KEY\" --api s3v4 --path on"
+            eval "$mcli_cmd alias set \"$S3_ALIAS\" \"$S3_ENDPOINT\" \"$S3_ACCESS_KEY\" \"$S3_SECRET_KEY\" --api s3v4 --path on" >/dev/null
         else
-            $mcli_cmd alias set "$S3_ALIAS" "$S3_ENDPOINT" "$S3_ACCESS_KEY" "$S3_SECRET_KEY" --api s3v4 --path on
+            $mcli_cmd alias set "$S3_ALIAS" "$S3_ENDPOINT" "$S3_ACCESS_KEY" "$S3_SECRET_KEY" --api s3v4 --path on >/dev/null
         fi
     fi
 }
@@ -229,7 +235,7 @@ upload_to_s3() {
     
     local mcli_cmd
     mcli_cmd=$(get_command "$MC_CMD" "minio/mc:latest" "-v \"$BACKUP_DIR:$BACKUP_DIR\" -v \"$HOME/.mc:/root/.mc\"" "mc") || {
-        error "MinIO Client ($MC_CMD) not found and Docker is not available. Skipping S3 upload."
+        error "MinIO Client ($MC_CMD) not found. Skipping S3 upload."
         return 1
     }
 
@@ -239,10 +245,9 @@ upload_to_s3() {
     local clean_path="${S3_PATH#/}" # Remove leading slash
     [[ -n "$clean_path" && "$clean_path" != */ ]] && clean_path="${clean_path}/" # Ensure trailing slash
     
-    # Smart handle for Aliyun OSS Access Point: if endpoint contains AP domain, the alias represents the bucket
     local target
+    # 如果是接入点，别名已经等于 bucket 名，所以目标就是 ALIAS/KEY
     if [[ "$S3_ENDPOINT" == *".accesspoint.aliyuncs.com"* ]]; then
-        # Use ALIAS/PATH (S3_BUCKET is implicit in AP)
         target="${S3_ALIAS}/${clean_path}${name}"
     else
         target="${S3_ALIAS}/${S3_BUCKET}/${clean_path}${name}"
