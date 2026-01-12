@@ -85,13 +85,11 @@ get_command() {
         echo "$cmd"
     else
         # Fallback to Docker
-        if ! command -v docker >/dev/null 2>&1; then
-            error "Neither '$cmd' nor 'docker' found. Please install one of them."
-            exit 1
-        fi
+        if command -v docker >/dev/null 2>&1; then
             echo "docker run --rm -i mysql:latest $cmd"
         else
-            return 1
+            error "Neither '$cmd' nor 'docker' found. Please install one of them."
+            exit 1
         fi
     fi
 }
@@ -182,8 +180,8 @@ do_restore() {
 
     log "Restore completed successfully."
     
-    # Clean up temp file if downloaded from S3
-    if [[ "$source" == s3://* ]]; then
+    # Clean up temp file if downloaded from S3/MinIO
+    if [ "$restore_file" == "${BACKUP_DIR}/tmp_restore.sql.gz" ]; then
         rm -f "$restore_file"
     fi
 }
