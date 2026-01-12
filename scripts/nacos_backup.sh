@@ -21,10 +21,11 @@ BACKUP_DIR="/opt/nacos-backups"
 RETENTION_DAYS=7
 
 ENABLE_S3=false
+S3_ALIAS="myminio"
 S3_BUCKET="my-nacos-backups"
 S3_PATH="nacos-db/"
-S3_ENDPOINT=""
 S3_RETENTION_DAYS=30
+MC_CMD="mcli"
 
 # Logger
 log() {
@@ -56,16 +57,17 @@ Backup & Retention:
   --retention <days>            Local retention days (Default: $RETENTION_DAYS)
 
 S3 Configuration:
-  --s3                          Enable S3 backup.
+  --s3                          Enable S3 backup (via MinIO Client).
+  --s3-alias <alias>            S3 alias configured in mc (Default: $S3_ALIAS)
   --s3-bucket <bucket>          S3 bucket name.
   --s3-path <path>              S3 path prefix (Default: $S3_PATH)
   --s3-retention <days>         S3 retention days (Default: $S3_RETENTION_DAYS)
-  --s3-endpoint <url>           Optional S3 endpoint URL.
+  --mc-cmd <cmd>                MinIO Client command name (Default: $MC_CMD)
 
 Examples:
   $0 --backup --db-host 1.2.3.4 --db-pass "my-secret"
   $0 --backup --s3 --s3-bucket my-backups
-  $0 --restore s3://my-bucket/nacos-db/nacos_db_20260109_1540.sql.gz
+  $0 --restore mc/myminio/my-nacos-backups/nacos-db/nacos_db_20260109_1540.sql.gz
 EOF
     exit 0
 }
@@ -134,10 +136,15 @@ do_restore() {
     local restore_file=""
     
     # S3 Source handling
-    if [[ "$source" == s3://* ]]; then
-        log "Downloading backup from S3: $source"
+    if [[ "$source" == mc/* ]] || [[ "$source" == */* ]]; then
+        # Check if it looks like an mc path (contains alias/bucket)
+        if [[ "$source" == mc/* ]]; then
+            source="${source#mc/}"
+        fi
+        
+        log "Downloading backup from S3/MinIO: $source"
         restore_file="${BACKUP_DIR}/tmp_restore.sql.gz"
-        aws s3 cp "$source" "$restore_file" ${S3_ENDPOINT:+--endpoint-url $S3_ENDPOINT}
+        $MC_CMD cp "$source" "$restore_file"
     else
         restore_file="$source"
     fi
@@ -172,30 +179,22 @@ do_restore() {
 upload_to_s3() {
     local file=$1
     local name=$2
-    log "Uploading to S3: s3://${S3_BUCKET}/${S3_PATH}${name}"
+    local target="${S3_ALIAS}/${S3_BUCKET}/${S3_PATH}${name}"
+    log "Uploading to S3 (mc): $target"
     
-    if ! command -v aws >/dev/null 2>&1; then
-        error "AWS CLI not found. Skipping S3 upload."
+    if ! command -v "$MC_CMD" >/dev/null 2>&1; then
+        error "MinIO Client ($MC_CMD) not found. Skipping S3 upload."
         return 1
     fi
 
-    aws s3 cp "$file" "s3://${S3_BUCKET}/${S3_PATH}${name}" ${S3_ENDPOINT:+--endpoint-url $S3_ENDPOINT}
+    $MC_CMD cp "$file" "$target"
 }
 
 cleanup_s3() {
     log "Cleaning up old backups from S3 (Retention: ${S3_RETENTION_DAYS} days)..."
-    local cutoff_date=$(date -d "${S3_RETENTION_DAYS} days ago" +%Y-%m-%dT%H:%M:%S)
     
-    # List files and delete those older than cutoff
-    aws s3 ls "s3://${S3_BUCKET}/${S3_PATH}" ${S3_ENDPOINT:+--endpoint-url $S3_ENDPOINT} --recursive | while read -r line; do
-        local file_date=$(echo "$line" | awk '{print $1"T"$2}')
-        local file_path=$(echo "$line" | awk '{print $4}')
-        
-        if [[ "$file_date" < "$cutoff_date" ]]; then
-            log "Deleting old S3 backup: $file_path"
-            aws s3 rm "s3://${S3_BUCKET}/${file_path}" ${S3_ENDPOINT:+--endpoint-url $S3_ENDPOINT}
-        fi
-    done
+    # Use mc find --older-than to delete old files
+    $MC_CMD rm --recursive --older-than "${S3_RETENTION_DAYS}d" "${S3_ALIAS}/${S3_BUCKET}/${S3_PATH}"
 }
 
 cleanup_local() {
@@ -254,6 +253,10 @@ while [[ $# -gt 0 ]]; do
             ENABLE_S3=true
             shift
             ;;
+        --s3-alias)
+            S3_ALIAS="$2"
+            shift 2
+            ;;
         --s3-bucket)
             S3_BUCKET="$2"
             shift 2
@@ -262,8 +265,8 @@ while [[ $# -gt 0 ]]; do
             S3_PATH="$2"
             shift 2
             ;;
-        --s3-endpoint)
-            S3_ENDPOINT="$2"
+        --mc-cmd)
+            MC_CMD="$2"
             shift 2
             ;;
         --s3-retention)
