@@ -212,7 +212,7 @@ setup_mcli_alias() {
             S3_ENDPOINT="http://${S3_ENDPOINT}"
         fi
         log "Configuring mcli alias: $S3_ALIAS (Endpoint: $S3_ENDPOINT)"
-        $mcli_cmd alias set "$S3_ALIAS" "$S3_ENDPOINT" "$S3_ACCESS_KEY" "$S3_SECRET_KEY" >/dev/null
+        $mcli_cmd alias set "$S3_ALIAS" "$S3_ENDPOINT" "$S3_ACCESS_KEY" "$S3_SECRET_KEY" --api s3v4 >/dev/null
     fi
 }
 
