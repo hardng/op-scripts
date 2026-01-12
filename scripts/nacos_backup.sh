@@ -81,15 +81,16 @@ EOF
 # Check if a command exists locally, otherwise return a docker-run command
 get_command() {
     local cmd=$1
+    local image=$2
+    local extra_flags=$3
     if command -v "$cmd" >/dev/null 2>&1; then
         echo "$cmd"
     else
         # Fallback to Docker
         if command -v docker >/dev/null 2>&1; then
-            echo "docker run --rm -i mysql:latest $cmd"
+            echo "docker run --rm $extra_flags $image $cmd"
         else
-            error "Neither '$cmd' nor 'docker' found. Please install one of them."
-            exit 1
+            return 1
         fi
     fi
 }
@@ -103,7 +104,11 @@ do_backup() {
 
     log "Starting backup: ${DB_NAME} from ${DB_HOST}..."
     
-    local mysqldump_cmd=$(get_command "mysqldump")
+    local mysqldump_cmd
+    mysqldump_cmd=$(get_command "mysqldump" "mysql:latest" "-i") || {
+        error "Neither 'mysqldump' nor 'docker' found. Please install one of them."
+        exit 1
+    }
     
     # Execute dump and compress
     log "Executing dump..."
@@ -176,7 +181,11 @@ do_restore() {
     fi
 
     log "Restoring database..."
-    local mysql_cmd=$(get_command "mysql")
+    local mysql_cmd
+    mysql_cmd=$(get_command "mysql" "mysql:latest" "-i") || {
+        error "Neither 'mysql' nor 'docker' found. Please install one of them."
+        exit 1
+    }
     
     # Decompress and import
     if [[ "$mysql_cmd" == *"docker"* ]]; then
@@ -194,11 +203,11 @@ do_restore() {
 }
 
 # --- S3 Operations ---
-# Helper to ensure mcli alias is configured
 setup_mcli_alias() {
+    local mcli_cmd=$1
     if [ -n "$S3_ENDPOINT" ] && [ -n "$S3_ACCESS_KEY" ] && [ -n "$S3_SECRET_KEY" ]; then
         log "Configuring mcli alias: $S3_ALIAS"
-        $MC_CMD alias set "$S3_ALIAS" "$S3_ENDPOINT" "$S3_ACCESS_KEY" "$S3_SECRET_KEY" >/dev/null
+        $mcli_cmd alias set "$S3_ALIAS" "$S3_ENDPOINT" "$S3_ACCESS_KEY" "$S3_SECRET_KEY" >/dev/null
     fi
 }
 
@@ -206,23 +215,28 @@ upload_to_s3() {
     local file=$1
     local name=$2
     
-    if ! command -v "$MC_CMD" >/dev/null 2>&1; then
-        error "MinIO Client ($MC_CMD) not found. Skipping S3 upload."
+    local mcli_cmd
+    # When using docker for mc, we need to mount the backup directory to access the file
+    mcli_cmd=$(get_command "$MC_CMD" "minio/mc:latest" "-v \"$BACKUP_DIR:$BACKUP_DIR\" -v \"$HOME/.mc:/root/.mc\"") || {
+        error "MinIO Client ($MC_CMD) not found and Docker is not available. Skipping S3 upload."
         return 1
-    fi
+    }
 
-    setup_mcli_alias
+    setup_mcli_alias "$mcli_cmd"
 
     local target="${S3_ALIAS}/${S3_BUCKET}/${S3_PATH}${name}"
     log "Uploading to S3 (mcli): $target"
-    $MC_CMD cp "$file" "$target"
+    $mcli_cmd cp "$file" "$target"
 }
 
 cleanup_s3() {
     log "Cleaning up old backups from S3 (Retention: ${S3_RETENTION_DAYS} days)..."
-    setup_mcli_alias
+    local mcli_cmd
+    mcli_cmd=$(get_command "$MC_CMD" "minio/mc:latest" "-v \"$HOME/.mc:/root/.mc\"") || return 1
+    
+    setup_mcli_alias "$mcli_cmd"
     # Use mc find --older-than to delete old files
-    $MC_CMD rm --recursive --older-than "${S3_RETENTION_DAYS}d" "${S3_ALIAS}/${S3_BUCKET}/${S3_PATH}"
+    $mcli_cmd rm --recursive --older-than "${S3_RETENTION_DAYS}d" "${S3_ALIAS}/${S3_BUCKET}/${S3_PATH}"
 }
 
 cleanup_local() {
