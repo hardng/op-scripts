@@ -83,12 +83,13 @@ get_command() {
     local cmd=$1
     local image=$2
     local extra_flags=$3
+    local container_cmd=${4:-$cmd}
     if command -v "$cmd" >/dev/null 2>&1; then
         echo "$cmd"
     else
         # Fallback to Docker
         if command -v docker >/dev/null 2>&1; then
-            echo "docker run --rm $extra_flags $image $cmd"
+            echo "docker run --rm $extra_flags $image $container_cmd"
         else
             return 1
         fi
@@ -214,7 +215,7 @@ setup_mcli_alias() {
         log "Configuring mcli alias: $S3_ALIAS (Endpoint: $S3_ENDPOINT)"
         # Aliyun OSS (including Access Points) requires Virtual-Hosted Style and S3v4.
         # DO NOT use --path on, as it causes 'InvalidAccessPointNetworkType' or Access Denied.
-        $mcli_cmd alias set "$S3_ALIAS" "$S3_ENDPOINT" "$S3_ACCESS_KEY" "$S3_SECRET_KEY" --api s3v4 >/dev/null
+        eval "$mcli_cmd alias set \"$S3_ALIAS\" \"$S3_ENDPOINT\" \"$S3_ACCESS_KEY\" \"$S3_SECRET_KEY\" --api s3v4" >/dev/null
     fi
 }
 
@@ -224,7 +225,8 @@ upload_to_s3() {
     
     local mcli_cmd
     # When using docker for mc, we need to mount the backup directory to access the file
-    mcli_cmd=$(get_command "$MC_CMD" "minio/mc:latest" "-v \"$BACKUP_DIR:$BACKUP_DIR\" -v \"$HOME/.mc:/root/.mc\"") || {
+    # Inside the container, the command is always 'mc'
+    mcli_cmd=$(get_command "$MC_CMD" "minio/mc:latest" "-v \"$BACKUP_DIR:$BACKUP_DIR\" -v \"$HOME/.mc:/root/.mc\"" "mc") || {
         error "MinIO Client ($MC_CMD) not found and Docker is not available. Skipping S3 upload."
         return 1
     }
@@ -237,13 +239,13 @@ upload_to_s3() {
     
     local target="${S3_ALIAS}/${S3_BUCKET}/${clean_path}${name}"
     log "Uploading to S3 (mcli): $target"
-    $mcli_cmd cp "$file" "$target"
+    eval "$mcli_cmd cp \"$file\" \"$target\""
 }
 
 cleanup_s3() {
     log "Cleaning up old backups from S3 (Retention: ${S3_RETENTION_DAYS} days)..."
     local mcli_cmd
-    mcli_cmd=$(get_command "$MC_CMD" "minio/mc:latest" "-v \"$HOME/.mc:/root/.mc\"") || return 1
+    mcli_cmd=$(get_command "$MC_CMD" "minio/mc:latest" "-v \"$HOME/.mc:/root/.mc\"" "mc") || return 1
     
     setup_mcli_alias "$mcli_cmd"
     
@@ -251,7 +253,7 @@ cleanup_s3() {
     [[ -n "$clean_path" && "$clean_path" != */ ]] && clean_path="${clean_path}/"
 
     # Use mc find --older-than to delete old files
-    $mcli_cmd rm --recursive --older-than "${S3_RETENTION_DAYS}d" "${S3_ALIAS}/${S3_BUCKET}/${clean_path}"
+    eval "$mcli_cmd rm --recursive --older-than \"${S3_RETENTION_DAYS}d\" \"${S3_ALIAS}/${S3_BUCKET}/${clean_path}\""
 }
 
 cleanup_local() {
