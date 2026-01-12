@@ -206,7 +206,12 @@ do_restore() {
 setup_mcli_alias() {
     local mcli_cmd=$1
     if [ -n "$S3_ENDPOINT" ] && [ -n "$S3_ACCESS_KEY" ] && [ -n "$S3_SECRET_KEY" ]; then
-        log "Configuring mcli alias: $S3_ALIAS"
+        # mcli requires the URL to have a scheme (http/https)
+        if [[ "$S3_ENDPOINT" != http://* ]] && [[ "$S3_ENDPOINT" != https://* ]]; then
+            log "No scheme found in S3 URL, defaulting to http://"
+            S3_ENDPOINT="http://${S3_ENDPOINT}"
+        fi
+        log "Configuring mcli alias: $S3_ALIAS (Endpoint: $S3_ENDPOINT)"
         $mcli_cmd alias set "$S3_ALIAS" "$S3_ENDPOINT" "$S3_ACCESS_KEY" "$S3_SECRET_KEY" >/dev/null
     fi
 }
