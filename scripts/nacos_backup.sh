@@ -22,7 +22,7 @@ RETENTION_DAYS=7
 KEEP_COUNT=1
 
 ENABLE_S3=false
-S3_ALIAS="myminio"
+S3_ALIAS=""
 S3_BUCKET="my-nacos-backups"
 S3_PATH="nacos-db/"
 S3_RETENTION_DAYS=30
@@ -65,7 +65,7 @@ Backup & Retention:
 
 S3 Configuration:
   --s3                          Enable S3 backup (via MinIO Client).
-  --s3-alias <alias>            S3 alias configured in mc (Default: $S3_ALIAS)
+  --s3-alias <alias>            S3 alias for mcli (Default: same as --s3-bucket)
   --s3-bucket <bucket>          S3 bucket name.
   --s3-path <path>              S3 path prefix (Default: $S3_PATH)
   --s3-retention <days>         S3 retention days (Default: $S3_RETENTION_DAYS)
@@ -89,7 +89,7 @@ get_command() {
     local cmd=$1
     local image=$2
     local extra_flags=$3
-    local container_cmd=${4:-$cmd}
+    local container_cmd=${4-$cmd}
     if command -v "$cmd" >/dev/null 2>&1; then
         echo "$cmd"
     else
@@ -170,11 +170,18 @@ do_restore() {
 
     local restore_file=""
     
+    # S3 Source handling
+    if [[ "$source" == mc/* ]] || [[ "$source" == */* ]]; then
+        # Check if it looks like an mc path (contains alias/bucket)
+        if [[ "$source" == mc/* ]]; then
+            source="${source#mc/}"
+        fi
+        
         log "Downloading backup from S3/MinIO: $source"
         restore_file="${BACKUP_DIR}/tmp_restore.sql.gz"
         
         local mcli_cmd
-        mcli_cmd=$(get_command "$MC_CMD" "minio/mc:latest" "-v \"$BACKUP_DIR:$BACKUP_DIR\" -v \"$HOME/.mc:/root/.mc\"" "mc") || {
+        mcli_cmd=$(get_command "$MC_CMD" "minio/mc:latest" "-v \"$BACKUP_DIR:$BACKUP_DIR\" -v \"$HOME/.mc:/root/.mc\"" "") || {
             error "MinIO Client ($MC_CMD) not found. Skipping S3 download."
             exit 1
         }
@@ -236,10 +243,18 @@ setup_mcli_alias() {
         log "Configuring mcli alias: $S3_ALIAS (Endpoint: $S3_ENDPOINT)"
         # Ensure host config dir exists
         mkdir -p "$HOME/.mc"
+
+        # Aliyun Access Point auto-detection for Path-Style access
+        local path_flag=""
+        if [[ "$S3_ENDPOINT" == *"accesspoint.aliyuncs.com"* ]]; then
+            log "Aliyun Access Point detected: Enabling Path-Style access (--path on)"
+            path_flag="--path on"
+        fi
+
         if [[ "$mcli_cmd" == *"docker"* ]]; then
-            eval "$mcli_cmd alias set \"$S3_ALIAS\" \"$S3_ENDPOINT\" \"$S3_ACCESS_KEY\" \"$S3_SECRET_KEY\" --api s3v4"
+            eval "$mcli_cmd alias set \"$S3_ALIAS\" \"$S3_ENDPOINT\" \"$S3_ACCESS_KEY\" \"$S3_SECRET_KEY\" --api s3v4 $path_flag"
         else
-            $mcli_cmd alias set "$S3_ALIAS" "$S3_ENDPOINT" "$S3_ACCESS_KEY" "$S3_SECRET_KEY" --api s3v4
+            $mcli_cmd alias set "$S3_ALIAS" "$S3_ENDPOINT" "$S3_ACCESS_KEY" "$S3_SECRET_KEY" --api s3v4 $path_flag
         fi
     fi
 }
@@ -249,7 +264,8 @@ upload_to_s3() {
     local name=$2
     
     local mcli_cmd
-    mcli_cmd=$(get_command "$MC_CMD" "minio/mc:latest" "-v \"$BACKUP_DIR:$BACKUP_DIR\" -v \"$HOME/.mc:/root/.mc\"" "mc") || {
+    # Use empty string for container_cmd because minio/mc entrypoint is already 'mc'
+    mcli_cmd=$(get_command "$MC_CMD" "minio/mc:latest" "-v \"$BACKUP_DIR:$BACKUP_DIR\" -v \"$HOME/.mc:/root/.mc\"" "") || {
         error "MinIO Client ($MC_CMD) not found. Skipping S3 upload."
         return 1
     }
@@ -261,7 +277,11 @@ upload_to_s3() {
     [[ -n "$clean_path" && "$clean_path" != */ ]] && clean_path="${clean_path}/" # Ensure trailing slash
     
     local target
-    target="${S3_ALIAS}/${S3_BUCKET}/${clean_path}${name}"
+    if [ -n "$S3_BUCKET" ]; then
+        target="${S3_ALIAS}/${S3_BUCKET}/${clean_path}${name}"
+    else
+        target="${S3_ALIAS}/${clean_path}${name}"
+    fi
 
     log "Uploading to S3 (mcli): $target"
     if [[ "$mcli_cmd" == *"docker"* ]]; then
@@ -273,12 +293,18 @@ upload_to_s3() {
 
 cleanup_s3() {
     local mcli_cmd
-    mcli_cmd=$(get_command "$MC_CMD" "minio/mc:latest" "-v \"$HOME/.mc:/root/.mc\"" "mc") || return 1
+    mcli_cmd=$(get_command "$MC_CMD" "minio/mc:latest" "-v \"$HOME/.mc:/root/.mc\"" "") || return 1
     setup_mcli_alias "$mcli_cmd"
     
     local clean_path="${S3_PATH#/}"
     [[ -n "$clean_path" && "$clean_path" != */ ]] && clean_path="${clean_path}/"
-    local target="${S3_ALIAS}/${S3_BUCKET}/${clean_path}"
+    
+    local target
+    if [ -n "$S3_BUCKET" ]; then
+        target="${S3_ALIAS}/${S3_BUCKET}/${clean_path}"
+    else
+        target="${S3_ALIAS}/${clean_path}"
+    fi
 
     # 1. Time-based retention
     if [ "$S3_RETENTION_DAYS" -gt 0 ]; then
@@ -436,6 +462,21 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
+
+# Determine S3_ALIAS: 
+# 1. User specified via --s3-alias 
+# 2. Otherwise default to S3_BUCKET if bucket is specified
+# 3. Last fallback to 'myminio'
+if [ -z "$S3_ALIAS" ]; then
+    if [ -n "$S3_BUCKET" ]; then
+        S3_ALIAS="$S3_BUCKET"
+    else
+        S3_ALIAS="myminio"
+    fi
+fi
+
+# DEBUG: Final alias confirmation
+# log "DEBUG: S3_ALIAS=$S3_ALIAS, S3_BUCKET=$S3_BUCKET"
 
 if [ "$ACTION" == "backup" ]; then
     do_backup
