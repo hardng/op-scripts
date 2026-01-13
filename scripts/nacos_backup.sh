@@ -258,17 +258,10 @@ setup_mcli_alias() {
         # Ensure host config dir exists
         mkdir -p "$MC_CONFIG_DIR"
 
-        # Aliyun Access Point auto-detection for Path-Style access
-        local path_flag=""
-        if [[ "$S3_ENDPOINT" == *"accesspoint.aliyuncs.com"* ]]; then
-            log "Aliyun Access Point detected: Enabling Path-Style access (--path on)"
-            path_flag="--path on"
-        fi
-
         if [[ "$mcli_cmd" == *"docker"* ]]; then
-            eval "$mcli_cmd alias set \"$S3_ALIAS\" \"$S3_ENDPOINT\" \"$S3_ACCESS_KEY\" \"$S3_SECRET_KEY\" --api s3v4 $path_flag"
+            eval "$mcli_cmd alias set \"$S3_ALIAS\" \"$S3_ENDPOINT\" \"$S3_ACCESS_KEY\" \"$S3_SECRET_KEY\" --api s3v4"
         else
-            $mcli_cmd alias set "$S3_ALIAS" "$S3_ENDPOINT" "$S3_ACCESS_KEY" "$S3_SECRET_KEY" --api s3v4 $path_flag
+            $mcli_cmd alias set "$S3_ALIAS" "$S3_ENDPOINT" "$S3_ACCESS_KEY" "$S3_SECRET_KEY" --api s3v4
         fi
     fi
 }
@@ -292,8 +285,13 @@ upload_to_s3() {
     [[ -n "$clean_path" && "$clean_path" != */ ]] && clean_path="${clean_path}/" # Ensure trailing slash
     
     local target
-    # If using Aliyun Access Point, the AP is likely bucket-scoped, so we MUST omit the bucket from the path
-    if [[ "$S3_ENDPOINT" == *"accesspoint.aliyuncs.com"* ]]; then
+    # Check if S3_ENDPOINT already contains the bucket name (Virtual Hosted Style check)
+    local endpoint_no_proto="${S3_ENDPOINT#*://}"
+    
+    # 1. Access Point (always bucket-scoped) OR 2. Endpoint starts with bucket name
+    if [[ "$S3_ENDPOINT" == *"accesspoint.aliyuncs.com"* ]] || \
+       { [ -n "$S3_BUCKET" ] && [[ "$endpoint_no_proto" == "${S3_BUCKET}."* ]]; }; then
+        # Skip bucket in path
         target="${S3_ALIAS}/${clean_path}${name}"
     # Standard S3/MinIO logic
     elif [ -n "$S3_BUCKET" ]; then
@@ -319,7 +317,12 @@ cleanup_s3() {
     [[ -n "$clean_path" && "$clean_path" != */ ]] && clean_path="${clean_path}/"
     
     local target
-    if [[ "$S3_ENDPOINT" == *"accesspoint.aliyuncs.com"* ]]; then
+    # Check if S3_ENDPOINT already contains the bucket name (Virtual Hosted Style check)
+    local endpoint_no_proto="${S3_ENDPOINT#*://}"
+
+    # 1. Access Point (always bucket-scoped) OR 2. Endpoint starts with bucket name
+    if [[ "$S3_ENDPOINT" == *"accesspoint.aliyuncs.com"* ]] || \
+       { [ -n "$S3_BUCKET" ] && [[ "$endpoint_no_proto" == "${S3_BUCKET}."* ]]; }; then
         target="${S3_ALIAS}/${clean_path}"
     elif [ -n "$S3_BUCKET" ]; then
         target="${S3_ALIAS}/${S3_BUCKET}/${clean_path}"
