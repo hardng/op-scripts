@@ -283,6 +283,7 @@ upload_to_s3() {
         error "MinIO Client ($MC_CMD) not found. Skipping S3 upload."
         return 1
     }
+    
 
     setup_mcli_alias "$mcli_cmd"
 
@@ -291,8 +292,12 @@ upload_to_s3() {
     [[ -n "$clean_path" && "$clean_path" != */ ]] && clean_path="${clean_path}/" # Ensure trailing slash
     
     local target
-    if [ -n "$S3_BUCKET" ]; then
+    # If using Aliyun Access Point, the AP is likely bucket-scoped, so we MUST omit the bucket from the path
+    if [[ "$S3_ENDPOINT" == *"accesspoint.aliyuncs.com"* ]]; then
         target="${S3_ALIAS}/${clean_path}${name}"
+    # Standard S3/MinIO logic
+    elif [ -n "$S3_BUCKET" ]; then
+        target="${S3_ALIAS}/${S3_BUCKET}/${clean_path}${name}"
     else
         target="${S3_ALIAS}/${clean_path}${name}"
     fi
@@ -314,8 +319,10 @@ cleanup_s3() {
     [[ -n "$clean_path" && "$clean_path" != */ ]] && clean_path="${clean_path}/"
     
     local target
-    if [ -n "$S3_BUCKET" ]; then
+    if [[ "$S3_ENDPOINT" == *"accesspoint.aliyuncs.com"* ]]; then
         target="${S3_ALIAS}/${clean_path}"
+    elif [ -n "$S3_BUCKET" ]; then
+        target="${S3_ALIAS}/${S3_BUCKET}/${clean_path}"
     else
         target="${S3_ALIAS}/${clean_path}"
     fi
