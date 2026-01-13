@@ -170,16 +170,21 @@ do_restore() {
 
     local restore_file=""
     
-    # S3 Source handling
-    if [[ "$source" == mc/* ]] || [[ "$source" == */* ]]; then
-        # Check if it looks like an mc path (contains alias/bucket)
-        if [[ "$source" == mc/* ]]; then
-            source="${source#mc/}"
-        fi
-        
         log "Downloading backup from S3/MinIO: $source"
         restore_file="${BACKUP_DIR}/tmp_restore.sql.gz"
-        $MC_CMD cp "$source" "$restore_file"
+        
+        local mcli_cmd
+        mcli_cmd=$(get_command "$MC_CMD" "minio/mc:latest" "-v \"$BACKUP_DIR:$BACKUP_DIR\" -v \"$HOME/.mc:/root/.mc\"" "mc") || {
+            error "MinIO Client ($MC_CMD) not found. Skipping S3 download."
+            exit 1
+        }
+        setup_mcli_alias "$mcli_cmd"
+
+        if [[ "$mcli_cmd" == *"docker"* ]]; then
+            eval "$mcli_cmd cp \"$source\" \"$restore_file\""
+        else
+            $mcli_cmd cp "$source" "$restore_file"
+        fi
     else
         restore_file="$source"
     fi
@@ -229,10 +234,12 @@ setup_mcli_alias() {
         fi
         
         log "Configuring mcli alias: $S3_ALIAS (Endpoint: $S3_ENDPOINT)"
+        # Ensure host config dir exists
+        mkdir -p "$HOME/.mc"
         if [[ "$mcli_cmd" == *"docker"* ]]; then
-            eval "$mcli_cmd alias set \"$S3_ALIAS\" \"$S3_ENDPOINT\" \"$S3_ACCESS_KEY\" \"$S3_SECRET_KEY\" --api s3v4" >/dev/null
+            eval "$mcli_cmd alias set \"$S3_ALIAS\" \"$S3_ENDPOINT\" \"$S3_ACCESS_KEY\" \"$S3_SECRET_KEY\" --api s3v4"
         else
-            $mcli_cmd alias set "$S3_ALIAS" "$S3_ENDPOINT" "$S3_ACCESS_KEY" "$S3_SECRET_KEY" --api s3v4 >/dev/null
+            $mcli_cmd alias set "$S3_ALIAS" "$S3_ENDPOINT" "$S3_ACCESS_KEY" "$S3_SECRET_KEY" --api s3v4
         fi
     fi
 }
