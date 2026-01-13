@@ -292,7 +292,7 @@ upload_to_s3() {
     
     local target
     if [ -n "$S3_BUCKET" ]; then
-        target="${S3_ALIAS}/${S3_BUCKET}/${clean_path}${name}"
+        target="${S3_ALIAS}/${clean_path}${name}"
     else
         target="${S3_ALIAS}/${clean_path}${name}"
     fi
@@ -315,7 +315,7 @@ cleanup_s3() {
     
     local target
     if [ -n "$S3_BUCKET" ]; then
-        target="${S3_ALIAS}/${S3_BUCKET}/${clean_path}"
+        target="${S3_BUCKET}/${clean_path}"
     else
         target="${S3_ALIAS}/${clean_path}"
     fi
