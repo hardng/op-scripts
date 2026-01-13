@@ -28,7 +28,21 @@ S3_PATH="nacos-db/"
 S3_RETENTION_DAYS=30
 S3_KEEP_COUNT=1
 S3_CLEANUP_LOCAL=false
-MC_CMD="mcli"
+# Auto-detect mcli or mc
+if command -v mcli >/dev/null 2>&1; then
+    MC_CMD="mcli"
+elif command -v mc >/dev/null 2>&1; then
+    MC_CMD="mc"
+else
+    MC_CMD="mcli"
+fi
+
+# Detect config directory: prefer .mcli if it exists, otherwise .mc
+if [ -d "$HOME/.mcli" ]; then
+    MC_CONFIG_DIR="$HOME/.mcli"
+else
+    MC_CONFIG_DIR="$HOME/.mc"
+fi
 S3_ENDPOINT=""
 S3_ACCESS_KEY=""
 S3_SECRET_KEY=""
@@ -181,7 +195,7 @@ do_restore() {
         restore_file="${BACKUP_DIR}/tmp_restore.sql.gz"
         
         local mcli_cmd
-        mcli_cmd=$(get_command "$MC_CMD" "minio/mc:latest" "-v \"$BACKUP_DIR:$BACKUP_DIR\" -v \"$HOME/.mc:/root/.mc\"" "") || {
+        mcli_cmd=$(get_command "$MC_CMD" "minio/mc:latest" "-v \"$BACKUP_DIR:$BACKUP_DIR\" -v \"$MC_CONFIG_DIR:/root/.mc\"" "") || {
             error "MinIO Client ($MC_CMD) not found. Skipping S3 download."
             exit 1
         }
@@ -242,7 +256,7 @@ setup_mcli_alias() {
         
         log "Configuring mcli alias: $S3_ALIAS (Endpoint: $S3_ENDPOINT)"
         # Ensure host config dir exists
-        mkdir -p "$HOME/.mc"
+        mkdir -p "$MC_CONFIG_DIR"
 
         # Aliyun Access Point auto-detection for Path-Style access
         local path_flag=""
@@ -265,7 +279,7 @@ upload_to_s3() {
     
     local mcli_cmd
     # Use empty string for container_cmd because minio/mc entrypoint is already 'mc'
-    mcli_cmd=$(get_command "$MC_CMD" "minio/mc:latest" "-v \"$BACKUP_DIR:$BACKUP_DIR\" -v \"$HOME/.mc:/root/.mc\"" "") || {
+    mcli_cmd=$(get_command "$MC_CMD" "minio/mc:latest" "-v \"$BACKUP_DIR:$BACKUP_DIR\" -v \"$MC_CONFIG_DIR:/root/.mc\"" "") || {
         error "MinIO Client ($MC_CMD) not found. Skipping S3 upload."
         return 1
     }
@@ -293,7 +307,7 @@ upload_to_s3() {
 
 cleanup_s3() {
     local mcli_cmd
-    mcli_cmd=$(get_command "$MC_CMD" "minio/mc:latest" "-v \"$HOME/.mc:/root/.mc\"" "") || return 1
+    mcli_cmd=$(get_command "$MC_CMD" "minio/mc:latest" "-v \"$MC_CONFIG_DIR:/root/.mc\"" "") || return 1
     setup_mcli_alias "$mcli_cmd"
     
     local clean_path="${S3_PATH#/}"
