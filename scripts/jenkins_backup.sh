@@ -147,7 +147,7 @@ setup_mcli_alias() {
         if [[ "$mcli_cmd" == *"docker"* ]]; then
             eval "$mcli_cmd alias set \"$S3_ALIAS\" \"$S3_ENDPOINT\" \"$S3_ACCESS_KEY\" \"$S3_SECRET_KEY\" --api s3v4 $lookup_flag"
         else
-            $mcli_cmd alias set "$S3_ALIAS" "$S3_ENDPOINT" "$S3_ACCESS_KEY" "$S3_SECRET_KEY" --api s3v4 $lookup_flag"
+            $mcli_cmd alias set "$S3_ALIAS" "$S3_ENDPOINT" "$S3_ACCESS_KEY" "$S3_SECRET_KEY" --api s3v4 $lookup_flag
         fi
     fi
 }
