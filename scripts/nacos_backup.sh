@@ -17,7 +17,7 @@ DB_USER="nacos"
 DB_PASSWORD="nacos"
 DB_NAME="nacos_devtest"
 
-BACKUP_DIR="/opt/nacos-backups"
+BACKUP_DIR="/tmp/nacos-backups"
 RETENTION_DAYS=7
 KEEP_COUNT=1
 
