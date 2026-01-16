@@ -304,14 +304,13 @@ do_backup() {
     fi
 
     # Append output args
+    # Explicitly ensure --gzip is separate
     mongodump_cmd_args="$mongodump_cmd_args --archive=\"$filepath\" --gzip"
 
     # 2. Get Command (Local or Docker)
-    # Note: For Docker, the logic is slightly trickier because we need to construct the full command string
-    # and handle quoting carefully.
-    
     if command -v mongodump >/dev/null 2>&1; then
         # Local execution
+        log "Executing: mongodump $mongodump_cmd_args"
         eval "mongodump $mongodump_cmd_args" || {
             error "mongodump failed."
             exit 1
@@ -320,22 +319,12 @@ do_backup() {
         # Docker execution
         if command -v docker >/dev/null 2>&1; then
             log "mongodump not found locally, using Docker..."
-            # Adjust filepath for inside container
-            # We mount $BACKUP_DIR to $BACKUP_DIR, so path is same.
             
-            # CAUTION: URI might contain characters that confuse shell eval inside docker run if not careful.
-            # Ideally we pass args as is.
-            # Simplification: We construct the full command line to run inside sh -c
+            # Construct docker command string for logging and execution
+            local docker_run_cmd="docker run --rm -v \"$BACKUP_DIR:$BACKUP_DIR\" mongo:latest mongodump $mongodump_cmd_args"
+            log "Executing: $docker_run_cmd"
             
-            local docker_cmd="mongodump $mongodump_cmd_args"
-            # Use 'mongo:latest' or 'mongo:4.4' etc. user might want to customize via env var but default 'mongo:latest' is usually fine for dump
-            # Volume mount: Backup Dir
-            
-            # Using eval to run docker with correct quoting is hard. 
-            # We'll use a safer approach: Bash arrays if possible, but we are using sh/bash string eval above.
-            
-            # Let's try running simply:
-            eval "docker run --rm -v \"$BACKUP_DIR:$BACKUP_DIR\" mongo:latest $docker_cmd" || {
+            eval "$docker_run_cmd" || {
                 error "Docker mongodump failed."
                 exit 1
             }
