@@ -118,19 +118,23 @@ setup_mcli_alias() {
             S3_ENDPOINT="http://${S3_ENDPOINT}"
         fi
 
-        # Implement Virtual Hosted Style: Prepend bucket to endpoint if provided
+        # Virtual Hosted Style fix
         if [ -n "$S3_BUCKET" ]; then
-            # Extract domain without protocol
             local domain="${S3_ENDPOINT#*://}"
-            
-            # Only prepend if not already there
-            if [[ "$domain" != "${S3_BUCKET}."* ]]; then
-                log "Prepending bucket to endpoint for Virtual Hosted Style: ${S3_BUCKET}.${domain}"
-                if [[ "$S3_ENDPOINT" == https://* ]]; then
-                    S3_ENDPOINT="https://${S3_BUCKET}.${domain}"
-                else
-                    S3_ENDPOINT="http://${S3_BUCKET}.${domain}"
+            # Check if domain is an IP address using regex
+            if [[ ! "$domain" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(:[0-9]+)?$ ]]; then
+                if [[ "$domain" != "${S3_BUCKET}."* ]]; then
+                    if [[ "$S3_ENDPOINT" != *"aliyuncs.com"* ]] && [[ "$S3_ENDPOINT" != *"accesspoint"* ]]; then
+                        log "Prepending bucket to endpoint for Virtual Hosted Style: ${S3_BUCKET}.${domain}"
+                        if [[ "$S3_ENDPOINT" == https://* ]]; then
+                            S3_ENDPOINT="https://${S3_BUCKET}.${domain}"
+                        else
+                            S3_ENDPOINT="http://${S3_BUCKET}.${domain}"
+                        fi
+                    fi
                 fi
+            else
+                log "Endpoint is an IP address, skipping Virtual Hosted Style adjustment."
             fi
         fi
 

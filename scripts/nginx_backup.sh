@@ -121,21 +121,20 @@ setup_mcli_alias() {
         # Virtual Hosted Style fix
         if [ -n "$S3_BUCKET" ]; then
             local domain="${S3_ENDPOINT#*://}"
-            if [[ "$domain" != "${S3_BUCKET}."* ]]; then
-                 # Only prepend if it's NOT an Aliyun Access Point (APs are bucket-specific already)
-                 # Actually, APs don't use bucket prefixes usually, but let's stick to the safe logic:
-                 # If it looks like a generic endpoint, try prepending. 
-                 # BUT for safety, let's trust the user or checking AP.
-                 # The previous logic was: if not starts with bucket, prepend.
-                 # Let's keep consistency with previous scripts.
-                 if [[ "$S3_ENDPOINT" != *"aliyuncs.com"* ]] || [[ "$S3_ENDPOINT" != *"accesspoint"* ]]; then
-                     log "Prepending bucket to endpoint for Virtual Hosted Style: ${S3_BUCKET}.${domain}"
-                     if [[ "$S3_ENDPOINT" == https://* ]]; then
-                         S3_ENDPOINT="https://${S3_BUCKET}.${domain}"
-                     else
-                         S3_ENDPOINT="http://${S3_BUCKET}.${domain}"
+            # Check if domain is an IP address using regex
+            if [[ ! "$domain" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(:[0-9]+)?$ ]]; then
+                if [[ "$domain" != "${S3_BUCKET}."* ]]; then
+                     if [[ "$S3_ENDPOINT" != *"aliyuncs.com"* ]] && [[ "$S3_ENDPOINT" != *"accesspoint"* ]]; then
+                         log "Prepending bucket to endpoint for Virtual Hosted Style: ${S3_BUCKET}.${domain}"
+                         if [[ "$S3_ENDPOINT" == https://* ]]; then
+                             S3_ENDPOINT="https://${S3_BUCKET}.${domain}"
+                         else
+                             S3_ENDPOINT="http://${S3_BUCKET}.${domain}"
+                         fi
                      fi
-                 fi
+                fi
+            else
+                log "Endpoint is an IP address, skipping Virtual Hosted Style adjustment."
             fi
         fi
 
