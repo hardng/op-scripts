@@ -22,6 +22,7 @@ Available commands:
   all       Perform all configurations (install packages, security, timezone, SSH, optimization, expand, clean)
   init      Perform configurations (install packages, security, timezone, SSH, optimization, clean)
   update    Install or update base packages
+  mirror    Configure package mirrors to use Aliyun (China) for faster downloads
   security  Disable firewall and SELinux (RHEL) or ufw (Debian)
   time      Set timezone to Asia/Shanghai and enable NTP
   ssh       Configure SSH (disable UseDNS)
@@ -33,6 +34,7 @@ Available commands:
 
 Examples:
   $0 all       # Perform all initialization tasks
+  $0 mirror    # Configure Aliyun mirrors for faster downloads
   $0 autodisk  # Auto-format and mount unused disks
   $0 expand    # Expand root LVM partition
 EOF
@@ -122,6 +124,88 @@ clean_cache() {
     }
   fi
 }
+
+# Configure package mirrors to use Aliyun (China) for faster downloads
+configure_mirrors() {
+  echo "[INFO] Configuring package mirrors..."
+  
+  if [ "$OS_FAMILY" = "rhel" ]; then
+    # Backup original repo files
+    if [ ! -d /etc/yum.repos.d/backup ]; then
+      mkdir -p /etc/yum.repos.d/backup
+      cp -f /etc/yum.repos.d/*.repo /etc/yum.repos.d/backup/ 2>/dev/null || true
+    fi
+    
+    # Configure based on OS version
+    case "$OS_NAME" in
+      rocky)
+        echo "[INFO] Configuring Rocky Linux Aliyun mirrors..."
+        sed -e 's|^mirrorlist=|#mirrorlist=|g' \
+            -e 's|^#baseurl=http://dl.rockylinux.org/$contentdir|baseurl=https://mirrors.aliyun.com/rockylinux|g' \
+            -i.bak /etc/yum.repos.d/rocky*.repo
+        ;;
+      almalinux)
+        echo "[INFO] Configuring AlmaLinux Aliyun mirrors..."
+        sed -e 's|^mirrorlist=|#mirrorlist=|g' \
+            -e 's|^#baseurl=https://repo.almalinux.org|baseurl=https://mirrors.aliyun.com|g' \
+            -i.bak /etc/yum.repos.d/almalinux*.repo
+        ;;
+      centos)
+        if [ "${OS_VERSION%%.*}" = "7" ]; then
+          echo "[INFO] Configuring CentOS 7 Aliyun mirrors..."
+          sed -e 's|^mirrorlist=|#mirrorlist=|g' \
+              -e 's|^#baseurl=http://mirror.centos.org|baseurl=https://mirrors.aliyun.com|g' \
+              -i.bak /etc/yum.repos.d/CentOS-*.repo
+        else
+          echo "[INFO] Configuring CentOS Stream Aliyun mirrors..."
+          sed -e 's|^mirrorlist=|#mirrorlist=|g' \
+              -e 's|^#baseurl=http://mirror.centos.org|baseurl=https://mirrors.aliyun.com|g' \
+              -i.bak /etc/yum.repos.d/centos*.repo
+        fi
+        ;;
+    esac
+    
+    # Configure EPEL mirror
+    if [ -f /etc/yum.repos.d/epel.repo ]; then
+      echo "[INFO] Configuring EPEL Aliyun mirror..."
+      sed -e 's|^metalink=|#metalink=|g' \
+          -e 's|^#baseurl=https\?://download.fedoraproject.org/pub/epel|baseurl=https://mirrors.aliyun.com/epel|g' \
+          -i.bak /etc/yum.repos.d/epel*.repo
+    fi
+    
+    # Clean and rebuild cache
+    $PKG_MGR clean all
+    $PKG_MGR makecache || {
+      echo "[WARN] Failed to rebuild cache, continuing anyway"
+      EXIT_CODE=1
+    }
+    
+  elif [ "$OS_FAMILY" = "debian" ]; then
+    # Backup original sources.list
+    if [ ! -f /etc/apt/sources.list.bak ]; then
+      cp /etc/apt/sources.list /etc/apt/sources.list.bak
+    fi
+    
+    echo "[INFO] Configuring Debian/Ubuntu Aliyun mirrors..."
+    case "$OS_NAME" in
+      ubuntu)
+        sed -i 's|http://.*archive.ubuntu.com|https://mirrors.aliyun.com|g' /etc/apt/sources.list
+        sed -i 's|http://.*security.ubuntu.com|https://mirrors.aliyun.com|g' /etc/apt/sources.list
+        ;;
+      debian)
+        sed -i 's|http://.*debian.org|https://mirrors.aliyun.com|g' /etc/apt/sources.list
+        ;;
+    esac
+    
+    $PKG_MGR update || {
+      echo "[WARN] Failed to update package sources"
+      EXIT_CODE=1
+    }
+  fi
+  
+  echo "[INFO] Mirror configuration completed"
+}
+
 
 # Install base packages
 install_pkgs() {
@@ -623,7 +707,7 @@ main() {
 
   # Only call detect_os for commands that need it (excluding expand, autodisk, disk)
   case "$1" in
-    all|init|update|security|time|ssh|optimize|clean)
+    all|init|update|mirror|security|time|ssh|optimize|clean)
       detect_os
       check_memory
       ;;
@@ -638,6 +722,7 @@ main() {
 
   case "$1" in
     all)
+      configure_mirrors || true
       install_pkgs || true
       disable_security || true
       set_timezone_ntp || true
@@ -647,6 +732,7 @@ main() {
       clean_cache || true
       ;;
     init)
+      configure_mirrors || true
       install_pkgs || true
       disable_security || true
       set_timezone_ntp || true
@@ -657,6 +743,9 @@ main() {
       ;;
     update)
       install_pkgs
+      ;;
+    mirror)
+      configure_mirrors
       ;;
     security)
       disable_security
