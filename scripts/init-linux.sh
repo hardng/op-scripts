@@ -203,9 +203,19 @@ configure_epel_mirror() {
   if [ "$OS_FAMILY" = "rhel" ]; then
     if [ -f /etc/yum.repos.d/epel.repo ]; then
       echo "[INFO] Configuring EPEL Aliyun mirror..."
-      sed -e 's|^metalink=|#metalink=|g' \
-          -e 's|^#baseurl=https\?://download.fedoraproject.org/pub/epel|baseurl=https://mirrors.aliyun.com/epel|g' \
-          -i.bak /etc/yum.repos.d/epel*.repo
+      
+      # Disable metalink and enable baseurl for all EPEL repos
+      for repo_file in /etc/yum.repos.d/epel*.repo; do
+        # Comment out metalink
+        sed -i 's/^metalink=/#metalink=/g' "$repo_file"
+        
+        # Uncomment baseurl if it exists
+        sed -i 's/^#baseurl=/baseurl=/g' "$repo_file"
+        
+        # Replace download.fedoraproject.org or download.example with mirrors.aliyun.com
+        sed -i 's|download\.fedoraproject\.org/pub|mirrors.aliyun.com|g' "$repo_file"
+        sed -i 's|download\.example/pub|mirrors.aliyun.com|g' "$repo_file"
+      done
       
       # Clean and rebuild cache
       $PKG_MGR clean all
