@@ -125,9 +125,9 @@ clean_cache() {
   fi
 }
 
-# Configure package mirrors to use Aliyun (China) for faster downloads
-configure_mirrors() {
-  echo "[INFO] Configuring package mirrors..."
+# Configure base package mirrors to use Aliyun (China) for faster downloads
+configure_base_mirrors() {
+  echo "[INFO] Configuring base package mirrors..."
   
   if [ "$OS_FAMILY" = "rhel" ]; then
     # Backup original repo files
@@ -165,14 +165,6 @@ configure_mirrors() {
         ;;
     esac
     
-    # Configure EPEL mirror
-    if [ -f /etc/yum.repos.d/epel.repo ]; then
-      echo "[INFO] Configuring EPEL Aliyun mirror..."
-      sed -e 's|^metalink=|#metalink=|g' \
-          -e 's|^#baseurl=https\?://download.fedoraproject.org/pub/epel|baseurl=https://mirrors.aliyun.com/epel|g' \
-          -i.bak /etc/yum.repos.d/epel*.repo
-    fi
-    
     # Clean and rebuild cache
     $PKG_MGR clean all
     $PKG_MGR makecache || {
@@ -203,7 +195,29 @@ configure_mirrors() {
     }
   fi
   
-  echo "[INFO] Mirror configuration completed"
+  echo "[INFO] Base mirror configuration completed"
+}
+
+# Configure EPEL mirror (must be called after epel-release is installed)
+configure_epel_mirror() {
+  if [ "$OS_FAMILY" = "rhel" ]; then
+    if [ -f /etc/yum.repos.d/epel.repo ]; then
+      echo "[INFO] Configuring EPEL Aliyun mirror..."
+      sed -e 's|^metalink=|#metalink=|g' \
+          -e 's|^#baseurl=https\?://download.fedoraproject.org/pub/epel|baseurl=https://mirrors.aliyun.com/epel|g' \
+          -i.bak /etc/yum.repos.d/epel*.repo
+      
+      # Clean and rebuild cache
+      $PKG_MGR clean all
+      $PKG_MGR makecache || {
+        echo "[WARN] Failed to rebuild EPEL cache, continuing anyway"
+        EXIT_CODE=1
+      }
+      echo "[INFO] EPEL mirror configuration completed"
+    else
+      echo "[WARN] EPEL repo file not found, skipping EPEL mirror configuration"
+    fi
+  fi
 }
 
 
@@ -211,10 +225,14 @@ configure_mirrors() {
 install_pkgs() {
   echo "[INFO] Installing base packages..."
   if [ "$OS_FAMILY" = "rhel" ]; then
+    # Install epel-release first
     $PKG_MGR install -y epel-release || {
       echo "[WARN] Failed to install epel-release, may already be installed or network issue"
       EXIT_CODE=1
     }
+    
+    # Now configure EPEL mirror after epel-release is installed
+    configure_epel_mirror || true
     
     # Install in batches to avoid OOM on low-memory systems
     echo "[INFO] Installing core utilities..."
@@ -722,7 +740,7 @@ main() {
 
   case "$1" in
     all)
-      configure_mirrors || true
+      configure_base_mirrors || true
       install_pkgs || true
       disable_security || true
       set_timezone_ntp || true
@@ -732,7 +750,7 @@ main() {
       clean_cache || true
       ;;
     init)
-      configure_mirrors || true
+      configure_base_mirrors || true
       install_pkgs || true
       disable_security || true
       set_timezone_ntp || true
@@ -745,7 +763,9 @@ main() {
       install_pkgs
       ;;
     mirror)
-      configure_mirrors
+      configure_base_mirrors
+      # Also configure EPEL if epel-release is already installed
+      configure_epel_mirror || true
       ;;
     security)
       disable_security
