@@ -67,6 +67,21 @@ detect_os() {
   fi
 }
 
+# Check available memory and warn if low
+check_memory() {
+  local mem_available_kb=$(grep MemAvailable /proc/meminfo | awk '{print $2}')
+  local mem_available_mb=$((mem_available_kb / 1024))
+  
+  echo "[INFO] Available memory: ${mem_available_mb}MB"
+  
+  if [ $mem_available_mb -lt 512 ]; then
+    echo "[WARN] Low memory detected (${mem_available_mb}MB available)"
+    echo "[WARN] Package installation uses batched mode to reduce memory pressure"
+    echo "[WARN] If installation still fails, consider increasing system memory"
+  fi
+}
+
+
 # Ensure lvm2 and parted are installed
 ensure_lvm_installed() {
   if ! command -v lvs &>/dev/null || ! command -v parted &>/dev/null; then
@@ -116,10 +131,23 @@ install_pkgs() {
       echo "[WARN] Failed to install epel-release, may already be installed or network issue"
       EXIT_CODE=1
     }
-    $PKG_MGR install -y unzip vim wget curl net-tools \
-      htop git bash-completion lvm2 cloud-utils-growpart parted xfsprogs e2fsprogs \
-      iftop traceroute nmap lsof open-vm-tools || {
-      echo "[ERROR] Failed to install packages"
+    
+    # Install in batches to avoid OOM on low-memory systems
+    echo "[INFO] Installing core utilities..."
+    $PKG_MGR install -y unzip vim wget curl net-tools htop git bash-completion || {
+      echo "[ERROR] Failed to install core utilities"
+      EXIT_CODE=1
+    }
+    
+    echo "[INFO] Installing disk and filesystem tools..."
+    $PKG_MGR install -y lvm2 cloud-utils-growpart parted xfsprogs e2fsprogs || {
+      echo "[ERROR] Failed to install disk tools"
+      EXIT_CODE=1
+    }
+    
+    echo "[INFO] Installing network and monitoring tools..."
+    $PKG_MGR install -y iftop traceroute nmap lsof open-vm-tools || {
+      echo "[ERROR] Failed to install network tools"
       EXIT_CODE=1
     }
   elif [ "$OS_FAMILY" = "debian" ]; then
@@ -127,10 +155,23 @@ install_pkgs() {
       echo "[ERROR] Failed to update package sources"
       EXIT_CODE=1
     }
-    $PKG_MGR install -y unzip vim wget curl net-tools \
-      htop git bash-completion lvm2 cloud-guest-utils parted xfsprogs e2fsprogs \
-      iftop traceroute nmap lsof || {
-      echo "[ERROR] Failed to install packages"
+    
+    # Install in batches to avoid OOM on low-memory systems
+    echo "[INFO] Installing core utilities..."
+    $PKG_MGR install -y unzip vim wget curl net-tools htop git bash-completion || {
+      echo "[ERROR] Failed to install core utilities"
+      EXIT_CODE=1
+    }
+    
+    echo "[INFO] Installing disk and filesystem tools..."
+    $PKG_MGR install -y lvm2 cloud-guest-utils parted xfsprogs e2fsprogs || {
+      echo "[ERROR] Failed to install disk tools"
+      EXIT_CODE=1
+    }
+    
+    echo "[INFO] Installing network and monitoring tools..."
+    $PKG_MGR install -y iftop traceroute nmap lsof || {
+      echo "[ERROR] Failed to install network tools"
       EXIT_CODE=1
     }
   fi
@@ -582,8 +623,9 @@ main() {
 
   # Only call detect_os for commands that need it (excluding expand, autodisk, disk)
   case "$1" in
-    all|update|security|time|ssh|optimize|clean)
+    all|init|update|security|time|ssh|optimize|clean)
       detect_os
+      check_memory
       ;;
     expand|autodisk|disk)
       # Handled within respective functions
