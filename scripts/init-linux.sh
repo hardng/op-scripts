@@ -130,6 +130,14 @@ configure_base_mirrors() {
   echo "[INFO] Configuring base package mirrors..."
   
   if [ "$OS_FAMILY" = "rhel" ]; then
+    # Check if already using Aliyun
+    if grep -q "mirrors.aliyun.com" /etc/yum.repos.d/rocky*.repo 2>/dev/null || \
+       grep -q "mirrors.aliyun.com" /etc/yum.repos.d/CentOS*.repo 2>/dev/null || \
+       grep -q "mirrors.aliyun.com" /etc/yum.repos.d/almalinux*.repo 2>/dev/null; then
+      echo "[INFO] Base mirrors are already configured with Aliyun."
+      return
+    fi
+
     # Backup original repo files
     if [ ! -d /etc/yum.repos.d/backup ]; then
       mkdir -p /etc/yum.repos.d/backup
@@ -173,6 +181,13 @@ configure_base_mirrors() {
     }
     
   elif [ "$OS_FAMILY" = "debian" ]; then
+    # Check if already using Aliyun
+    if grep -q "mirrors.aliyun.com" /etc/apt/sources.list; then
+      echo "[INFO] Base mirrors are already configured with Aliyun."
+      $PKG_MGR update
+      return
+    fi
+  
     # Backup original sources.list
     if [ ! -f /etc/apt/sources.list.bak ]; then
       cp /etc/apt/sources.list /etc/apt/sources.list.bak
@@ -202,6 +217,12 @@ configure_base_mirrors() {
 configure_epel_mirror() {
   if [ "$OS_FAMILY" = "rhel" ]; then
     if [ -f /etc/yum.repos.d/epel.repo ]; then
+      # Check if already using Aliyun for EPEL
+      if grep -q "mirrors.aliyun.com" /etc/yum.repos.d/epel.repo; then
+         echo "[INFO] EPEL mirrors are already configured with Aliyun."
+         return
+      fi
+
       echo "[INFO] Configuring EPEL Aliyun mirror..."
       
       # Disable metalink and enable baseurl for all EPEL repos
@@ -299,14 +320,18 @@ disable_security() {
       }
       echo "[INFO] Disabling SELinux..."
       setenforce 0 2>/dev/null || {
-        echo "[WARN] Failed to set SELinux to permissive, may already be disabled"
-        EXIT_CODE=1
+        # Check current status, if Disabled then setenforce command fails which is fine
+        if [ "$(getenforce)" != "Disabled" ]; then
+             echo "[WARN] Failed to set SELinux to permissive"
+        fi
       }
       if [ -f /etc/selinux/config ]; then
         sed -i 's/^SELINUX=.*/SELINUX=disabled/' /etc/selinux/config || {
           echo "[ERROR] Failed to update SELinux config"
           EXIT_CODE=1
         }
+        echo "[INFO] SELinux config updated to 'disabled' (will verify after reboot)"
+        echo "[INFO] Current status: $(getenforce) (Effective: Permissive)"
       else
         echo "[WARN] SELinux config file not found"
         EXIT_CODE=1

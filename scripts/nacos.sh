@@ -62,7 +62,7 @@ main() {
     NACOS_DIR="/opt/nacos-docker"
     NACOS_CONF_DIR="$NACOS_DIR/example/nacos-conf"
     NACOS_DATA_DIR="$NACOS_DIR/example/nacos-data"
-    DOCKER_COMPOSE_VERSION="v2.23.3"
+    DOCKER_COMPOSE_VERSION="v2.29.1"
     TEMP_DIR="/tmp/nacos-install"
 
     # Generate random passwords
@@ -138,12 +138,22 @@ main() {
 
     # Install Docker Compose
     echo -e "\033[32m#################### Installing Docker Compose... ####################\033[0m"
-    if [ ! -f "/usr/local/bin/docker-compose" ]; then
+    CURRENT_COMPOSE_VERSION=""
+    if [ -f "/usr/local/bin/docker-compose" ]; then
+        # Try to get version, handle cases where flag might fail or output differs
+        CURRENT_COMPOSE_VERSION=$(/usr/local/bin/docker-compose version --short 2>/dev/null || echo "unknown")
+    fi
+
+    # Compare version (stripping 'v' from DOCKER_COMPOSE_VERSION if needed for comparison)
+    REQUIRED_VERSION_NUM="${DOCKER_COMPOSE_VERSION#v}"
+    
+    if [ "$CURRENT_COMPOSE_VERSION" != "$REQUIRED_VERSION_NUM" ]; then
+        echo -e "\033[32mInstalling or Updating Docker Compose to $DOCKER_COMPOSE_VERSION...\033[0m"
         DOCKER_COMPOSE_URL="https://github.com/docker/compose/releases/download/$DOCKER_COMPOSE_VERSION/docker-compose-linux-x86_64"
         download_if_not_exists "$DOCKER_COMPOSE_URL" "/usr/local/bin/docker-compose"
         chmod +x /usr/local/bin/docker-compose
     else
-        echo -e "\033[32mDocker Compose already installed. Skipping installation.\033[0m"
+        echo -e "\033[32mDocker Compose $DOCKER_COMPOSE_VERSION already installed. Skipping installation.\033[0m"
     fi
     if [ ! -f "/usr/bin/docker-compose" ]; then
         ln -s /usr/local/bin/docker-compose /usr/bin/docker-compose

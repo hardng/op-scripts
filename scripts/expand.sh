@@ -13,7 +13,7 @@ usage() {
   cat <<EOF
 Usage: $CMD <command>
 
-ÍAvailable commands:
+Available commands:
   all       Run all initialization steps
   update    Update system and install base packages
   security  Disable SELinux and firewall
@@ -33,8 +33,6 @@ ensure_lvm_installed() {
     dnf install -y lvm2
   fi
 }
-
-
 # Clean DNF cache
 clean_cache() {
   echo "清理 DNF 缓存..."
@@ -50,7 +48,7 @@ update_system() {
   dnf install -y \
     unzip vim wget curl net-tools epel-release \
     htop git open-vm-tools bash-completion lvm2 cloud-utils-growpart parted xfsprogs e2fsprogs \
-	iftop traceroute nmap lsof net-tools
+    iftop traceroute nmap lsof net-tools
 }
 
 # Disable Firewall and SELinux
@@ -221,14 +219,14 @@ expand_lvm() {
 
   echo "[INFO] 自动扩展挂载在 / 的根文件系统..."
 
-  ROOT_DEV=$(df / | awk 'NR==2 {print $1}')
+  ROOT_DEV=$(df / | awk 'NR==2 {print $1}' | xargs)
   echo "[INFO] 根设备: $ROOT_DEV"
 
-  LV_PATH=$(lvs --noheadings -o lv_path | grep -E "$ROOT_DEV|/" || true)
+  LV_PATH=$(lvs --noheadings -o lv_path | grep -E "$ROOT_DEV|/" | awk '{print $1}' | head -n1 || true)
   [ -z "$LV_PATH" ] && LV_PATH="$ROOT_DEV"
 
   VG_NAME=$(lvs "$LV_PATH" -o vg_name --noheadings | awk '{print $1}' || true)
-  PV_NAME=$(pvs --noheadings -o pv_name | grep -E 'sd|nvme|vd' | head -n1)
+  PV_NAME=$(pvs --noheadings -o pv_name | grep -E 'sd|nvme|vd' | awk '{print $1}' | head -n1)
 
   if [ -z "$VG_NAME" ] || [ -z "$PV_NAME" ]; then
     echo "[ERROR] 无法识别 VG 或 PV，扩展失败。"
