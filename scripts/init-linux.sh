@@ -796,8 +796,8 @@ main() {
       detect_os
       check_memory
       ;;
-    expand|autodisk|disk)
-      # Handled within respective functions
+    expand|autodisk|disk|history)
+      # Handled within respective functions or doesn't need detect_os
       ;;
     *)
       echo "[ERROR] Invalid command: $1"
