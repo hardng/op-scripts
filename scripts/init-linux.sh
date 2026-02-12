@@ -446,22 +446,31 @@ EOF
   }
 }
 
-# Configure automatic command history clearing on exit
+# Configure automatic command history clearing on exit (session-only history)
 configure_history() {
-  echo "[INFO] Configuring automatic history clearing..."
+  echo "[INFO] Configuring automatic history clearing (session-only)..."
   
-  local history_conf="/etc/profile.d/history.sh"
+  local history_conf="/etc/profile.d/history_clear.sh"
   cat <<EOF > "$history_conf"
 # Automatic history clearing configuration
-export HISTSIZE=0
+# Keep history in memory during session but never save to disk
+export HISTFILE=/dev/null
+export HISTSIZE=1000
 export HISTFILESIZE=0
-# Optional: Clear history file on exit for active sessions
-trap 'history -c; history -w' EXIT
 EOF
 
   if [ -f "$history_conf" ]; then
     chmod 644 "$history_conf"
     echo "[INFO] History clearing configured in $history_conf"
+    
+    # Proactively clear existing history for common users
+    echo "[INFO] Clearing existing history files for common users..."
+    for user_home in /root /home/*; do
+      if [ -d "$user_home" ]; then
+        rm -f "$user_home/.bash_history"
+        ln -sf /dev/null "$user_home/.bash_history" 2>/dev/null || true
+      fi
+    done
   else
     echo "[ERROR] Failed to create history configuration"
     EXIT_CODE=1
