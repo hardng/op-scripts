@@ -30,6 +30,7 @@ Available commands:
   disk      Format and mount a selected disk with LVM and filesystem
   autodisk  Auto-detect unmounted disks, format, and mount to /dataX
   expand    Expand root LVM partition
+  history   Configure automatic command history clearing on exit
   clean     Clean package manager cache
 
 Examples:
@@ -445,6 +446,28 @@ EOF
   }
 }
 
+# Configure automatic command history clearing on exit
+configure_history() {
+  echo "[INFO] Configuring automatic history clearing..."
+  
+  local history_conf="/etc/profile.d/history.sh"
+  cat <<EOF > "$history_conf"
+# Automatic history clearing configuration
+export HISTSIZE=0
+export HISTFILESIZE=0
+# Optional: Clear history file on exit for active sessions
+trap 'history -c; history -w' EXIT
+EOF
+
+  if [ -f "$history_conf" ]; then
+    chmod 644 "$history_conf"
+    echo "[INFO] History clearing configured in $history_conf"
+  else
+    echo "[ERROR] Failed to create history configuration"
+    EXIT_CODE=1
+  fi
+}
+
 # Disable transparent huge pages and NUMA
 disable_thp_numa() {
   echo "[INFO] Disabling transparent huge pages and NUMA..."
@@ -782,6 +805,7 @@ main() {
       configure_ssh || true
       apply_sysctl_limits || true
       disable_thp_numa || true
+      configure_history || true
       clean_cache || true
       ;;
     init)
@@ -792,6 +816,7 @@ main() {
       configure_ssh || true
       apply_sysctl_limits || true
       disable_thp_numa || true
+      configure_history || true
       clean_cache || true
       ;;
     update)
@@ -825,6 +850,9 @@ main() {
       ;;
     expand)
       expand_root_lvm
+      ;;
+    history)
+      configure_history
       ;;
     clean)
       clean_cache
