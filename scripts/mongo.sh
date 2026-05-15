@@ -836,15 +836,24 @@ enable_auth() {
         fi
     done
 
-    LOCAL_ADDR=$(hostname -i 2>/dev/null | awk '{print $1}')
-    if [[ -z "$LOCAL_ADDR" ]]; then
-        LOCAL_ADDR=$(hostname)
+    # Check if primary is local
+    IS_PRIMARY_LOCAL=false
+    if echo "$PRIMARY_ADDR" | grep -q "^$LOCAL_ADDR:"; then
+        IS_PRIMARY_LOCAL=true
+    elif [[ "$MULTI_INSTANCE" == "true" ]]; then
+        # In multi-instance mode, check if primary IP matches any local IP or is loopback
+        PRIMARY_IP_ONLY=$(echo "$PRIMARY_ADDR" | cut -d: -f1)
+        if [[ "$PRIMARY_IP_ONLY" == "127.0.0.1" || "$PRIMARY_IP_ONLY" == "localhost" ]]; then
+            IS_PRIMARY_LOCAL=true
+        elif command -v ip >/dev/null && ip addr | grep -q "$PRIMARY_IP_ONLY"; then
+            IS_PRIMARY_LOCAL=true
+        elif command -v ifconfig >/dev/null && ifconfig | grep -q "$PRIMARY_IP_ONLY"; then
+            IS_PRIMARY_LOCAL=true
+        fi
     fi
 
-    echo "Local address: $LOCAL_ADDR"
-
-    if echo "$PRIMARY_ADDR" | grep -q "^$LOCAL_ADDR:"; then
-        echo "✅ Current node is primary, creating admin users..."
+    if [[ "$IS_PRIMARY_LOCAL" == "true" ]]; then
+        echo "✅ Current node is primary (or local multi-instance), creating admin users..."
         $CMD --port $PRIMARY_PORT <<EOF
 use admin
 db.createUser({
@@ -1050,6 +1059,7 @@ config_auth() {
             --role) ROLE="$2"; shift ;;
             --primary-ip) PRIMARY_IP="$2"; shift ;;
             --secondary-ip) SECONDARY_IP="$2"; shift ;;
+            --arbiter-ip) ARBITER_IP="$2"; shift ;;
             --multi-instance) MULTI_INSTANCE=true ;;
             *) echo "Unknown option: $1"; usage ;;
         esac
