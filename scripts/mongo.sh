@@ -853,8 +853,9 @@ enable_auth() {
     fi
 
     if [[ "$IS_PRIMARY_LOCAL" == "true" ]]; then
-        echo "✅ Current node is primary (or local multi-instance), creating admin users..."
-        $CMD --port $PRIMARY_PORT <<EOF
+        local actual_port=$(echo "$PRIMARY_ADDR" | cut -d: -f2)
+        echo "✅ Current node is primary (or local multi-instance), creating admin users on port $actual_port..."
+        $CMD --port $actual_port <<EOF
 use admin
 db.createUser({
   user: "${MONGO_MON_USER}",
@@ -892,7 +893,16 @@ configure_exporter_systemd() {
     local collector_params=""
     
     if [[ "$MULTI_INSTANCE" == "true" ]]; then
-        exporter_port=$((PROMETHEUS_EXPORTER_PORT + $(echo "$INSTANCE_NAME" | grep -o '[0-9]*') ))
+        local offset=$(echo "$INSTANCE_NAME" | grep -o '[0-9]*' || echo "")
+        if [[ -z "$offset" ]]; then
+            case "$INSTANCE_NAME" in
+                primary) offset=0 ;;
+                secondary) offset=1 ;;
+                arbiter) offset=2 ;;
+                *) offset=0 ;;
+            esac
+        fi
+        exporter_port=$((PROMETHEUS_EXPORTER_PORT + offset))
         service_name="mongodb-exporter-${INSTANCE_NAME}"
     fi
     
